@@ -1,6 +1,7 @@
 'use strict';
 
 const { app, BrowserWindow, Menu, dialog } = require('electron');
+const { version } = require('./package.json');
 
 let mainWindow;
 
@@ -11,6 +12,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     backgroundColor: '#0d1117',
+    title: `DICOM Viewer v${version}`,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -51,6 +53,23 @@ function createWindow() {
           label: '離開',
           accelerator: 'Alt+F4',
           role: 'quit',
+        },
+      ],
+    },
+    {
+      label: '說明',
+      submenu: [
+        {
+          label: `關於 DICOM Viewer`,
+          click: () => {
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: '關於 DICOM Viewer',
+              message: `DICOM Viewer`,
+              detail: `版本：v${version}\n作者：Anndy\n授權：GPL v2\n\nhttps://github.com/anndymaktub/dicom-viewer-claude`,
+              buttons: ['確定'],
+            });
+          },
         },
       ],
     },

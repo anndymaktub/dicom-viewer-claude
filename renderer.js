@@ -3,6 +3,7 @@
 const { ipcRenderer } = require('electron');
 const fs = require('fs');
 const dicomParser = require('dicom-parser');
+const { version } = require('./package.json');
 
 // ==================== State ====================
 const state = {
@@ -75,6 +76,7 @@ const wcDisplay          = document.getElementById('wcDisplay');
 const wwDisplay          = document.getElementById('wwDisplay');
 const resetBtn           = document.getElementById('resetBtn');
 const statusBar          = document.getElementById('statusBar');
+document.getElementById('subPanelTitle').textContent = `DICOM Viewer v${version}`;
 const dicomInfoSection   = document.getElementById('dicomInfoSection');
 const dicomInfoGrid      = document.getElementById('dicomInfoGrid');
 
