@@ -72,9 +72,22 @@ body {
 }
 
 #histContainer {
-  flex: 1;
+  height: 220px;
+  min-height: 80px;
   overflow: hidden;
-  min-height: 160px;
+  flex-shrink: 0;
+}
+
+#histDivider {
+  height: 5px;
+  background: #21262d;
+  cursor: row-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+#histDivider:hover,
+#histDivider.dragging {
+  background: #58a6ff;
 }
 
 #histCanvas {

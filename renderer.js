@@ -3284,40 +3284,72 @@ resizeObserver.observe(histContainer);
 // Initial layout
 window.addEventListener('DOMContentLoaded', resizeCanvases);
 
-// ==================== Panel Resize Divider ====================
+// ==================== Panel Resize Divider (left | right) ====================
 (function () {
   const divider  = document.getElementById('resizeDivider');
   const subPanel = document.getElementById('subPanel');
   const layout   = document.getElementById('layout');
 
-  let dragging   = false;
-  let startX     = 0;
-  let startWidth = 0;
+  let dragging = false, startX = 0, startWidth = 0;
 
   divider.addEventListener('mousedown', (e) => {
     dragging   = true;
     startX     = e.clientX;
     startWidth = subPanel.offsetWidth;
     divider.classList.add('dragging');
-    document.body.style.cursor    = 'col-resize';
+    document.body.style.cursor     = 'col-resize';
     document.body.style.userSelect = 'none';
     e.preventDefault();
   });
 
   document.addEventListener('mousemove', (e) => {
     if (!dragging) return;
-    const dx      = startX - e.clientX;          // dragging left → panel grows
-    const minW    = 200;
-    const maxW    = layout.offsetWidth - 200;
-    const newWidth = Math.max(minW, Math.min(maxW, startWidth + dx));
-    subPanel.style.width = newWidth + 'px';
+    const dx = startX - e.clientX;
+    const minW = 200, maxW = layout.offsetWidth - 200;
+    subPanel.style.width = Math.max(minW, Math.min(maxW, startWidth + dx)) + 'px';
   });
 
   document.addEventListener('mouseup', () => {
     if (!dragging) return;
     dragging = false;
     divider.classList.remove('dragging');
-    document.body.style.cursor    = '';
+    document.body.style.cursor     = '';
+    document.body.style.userSelect = '';
+    resizeCanvases();
+  });
+})();
+
+// ==================== Hist / Controls Resize Divider (top | bottom) ====================
+(function () {
+  const divider     = document.getElementById('histDivider');
+  const histCont    = document.getElementById('histContainer');
+  const subPanel    = document.getElementById('subPanel');
+
+  let dragging = false, startY = 0, startH = 0;
+
+  divider.addEventListener('mousedown', (e) => {
+    dragging  = true;
+    startY    = e.clientY;
+    startH    = histCont.offsetHeight;
+    divider.classList.add('dragging');
+    document.body.style.cursor     = 'row-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const dy   = e.clientY - startY;
+    const minH = 60;
+    const maxH = subPanel.offsetHeight - 120;
+    histCont.style.height = Math.max(minH, Math.min(maxH, startH + dy)) + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    divider.classList.remove('dragging');
+    document.body.style.cursor     = '';
     document.body.style.userSelect = '';
     resizeCanvases();
   });
