@@ -2378,6 +2378,7 @@ function renderAllTagsList(filter) {
     frag.appendChild(id); frag.appendChild(nm); frag.appendChild(val);
   });
   list.appendChild(frag);
+  if (window._updateScrollIndicator) window._updateScrollIndicator();
 }
 
 function updateAllTagsPanel(dataSet) {
@@ -2386,6 +2387,7 @@ function updateAllTagsPanel(dataSet) {
   const input = document.getElementById('tagSearchInput');
   input.value = '';
   renderAllTagsList('');
+  if (window._updateScrollIndicator) window._updateScrollIndicator();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -3343,6 +3345,7 @@ window.addEventListener('DOMContentLoaded', resizeCanvases);
     const minH = 60;
     const maxH = subPanel.offsetHeight - 120;
     histCont.style.height = Math.max(minH, Math.min(maxH, startH + dy)) + 'px';
+    if (window._updateScrollIndicator) window._updateScrollIndicator();
   });
 
   document.addEventListener('mouseup', () => {
@@ -3352,5 +3355,23 @@ window.addEventListener('DOMContentLoaded', resizeCanvases);
     document.body.style.cursor     = '';
     document.body.style.userSelect = '';
     resizeCanvases();
+    if (window._updateScrollIndicator) window._updateScrollIndicator();
   });
+})();
+
+// ==================== Scroll indicator: fade overlay when more content below ====================
+(function () {
+  const wrap = document.getElementById('controlsWrap');
+  const area = document.getElementById('controlsArea');
+  if (!wrap || !area) return;
+
+  function updateScrollIndicator() {
+    const hasMore = area.scrollHeight > area.clientHeight + 2 &&
+                    area.scrollTop + area.clientHeight < area.scrollHeight - 2;
+    wrap.classList.toggle('has-more', hasMore);
+  }
+
+  area.addEventListener('scroll', updateScrollIndicator, { passive: true });
+  window.addEventListener('resize', updateScrollIndicator);
+  window._updateScrollIndicator = updateScrollIndicator;
 })();
