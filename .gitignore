@@ -1,1 +1,4 @@
 node_modules/
+dist/
+dcms/
+tags_*.txt
