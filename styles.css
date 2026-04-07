@@ -85,8 +85,8 @@ body {
 /* ---- Controls Area (scrollable) ---- */
 #controlsArea {
   overflow-y: auto;
-  max-height: 52vh;
-  flex-shrink: 0;
+  flex: 1;
+  min-height: 0;
   border-top: 1px solid #21262d;
 }
 
@@ -318,14 +318,8 @@ body {
   gap: 2px 8px;
   font-size: 12px;
   font-family: 'Consolas', 'Courier New', monospace;
-  max-height: 40vh;
-  overflow-y: auto;
   margin-top: 4px;
 }
-
-#allTagsList::-webkit-scrollbar { width: 4px; }
-#allTagsList::-webkit-scrollbar-track { background: #0d1117; }
-#allTagsList::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
 
 .tag-id   { color: #58a6ff; white-space: nowrap; line-height: 1.7; }
 .tag-name { color: #8b949e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.7; }
