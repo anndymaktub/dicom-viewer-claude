@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "DICOM Viewer",
+      "runtimeExecutable": "node_modules/electron/dist/electron.exe",
+      "runtimeArgs": ["."],
+      "port": 0
+    }
+  ]
+}

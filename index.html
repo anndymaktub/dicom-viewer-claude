@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DICOM Viewer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="layout">
+    <div id="mainContainer">
+      <canvas id="mainCanvas"></canvas>
+    </div>
+
+    <div id="resizeDivider"></div>
+    <div id="subPanel">
+      <div id="subPanelTitle">Histogram</div>
+      <div id="histContainer">
+        <canvas id="histCanvas"></canvas>
+      </div>
+
+      <div id="controlsArea">
+
+        <!-- ① Window / Level -->
+        <div class="ctrl-section">
+          <div class="info-row">
+            <span class="info-label">Window Center</span>
+            <span id="wcDisplay" class="val-highlight">--</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Window Width</span>
+            <span id="wwDisplay" class="val-highlight">--</span>
+          </div>
+          <div class="info-row" id="monoRow" style="display:none">
+            <label class="toggle-label">
+              <input type="checkbox" id="invertMonoCheck" checked>
+              <span>MONOCHROME1 → 2 反轉</span>
+            </label>
+          </div>
+          <button id="resetBtn">重設原始 Window 設定</button>
+          <div class="help-hint">拖曳黃色邊界調整 WW &nbsp;|&nbsp; 拖曳中央調整 WC</div>
+        </div>
+
+        <!-- ② Display Options -->
+        <div class="ctrl-section">
+          <div class="section-header" data-target="dispContent">
+            <span>顯示選項</span><span class="chevron">▾</span>
+          </div>
+          <div id="dispContent" class="section-body">
+            <label class="toggle-label">
+              <input type="checkbox" id="showOverlayCheck" checked>
+              <span>影像資訊覆蓋</span>
+            </label>
+            <label class="toggle-label">
+              <input type="checkbox" id="smoothInterpCheck" checked>
+              <span>平滑插值縮放</span>
+            </label>
+            <label class="toggle-label">
+              <input type="checkbox" id="manualInvertCheck">
+              <span>手動反轉顯示</span>
+            </label>
+            <label class="toggle-label">
+              <input type="checkbox" id="showPixelValueCheck" checked>
+              <span>游標像素值</span>
+            </label>
+            <label class="toggle-label">
+              <input type="checkbox" id="showRulerCheck">
+              <span>比例尺</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- ③ Rendering Pipeline Tags -->
+        <div class="ctrl-section" id="renderPipelineSection" style="display:none">
+          <div class="section-header" data-target="renderPipelineContent">
+            <span>渲染流程 Tags</span><span class="chevron">▾</span>
+          </div>
+          <div id="renderPipelineContent" class="section-body">
+            <div id="renderPipelineGrid"></div>
+          </div>
+        </div>
+
+        <!-- ④ DICOM Info -->
+        <div class="ctrl-section" id="dicomInfoSection" style="display:none">
+          <div class="section-header" data-target="dicomContent">
+            <span>DICOM 影像資訊</span><span class="chevron">▾</span>
+          </div>
+          <div id="dicomContent" class="section-body">
+            <div id="dicomInfoGrid"></div>
+          </div>
+        </div>
+
+        <!-- ⑤ All Tags -->
+        <div class="ctrl-section" id="allTagsSection" style="display:none">
+          <div class="section-header" data-target="allTagsContent">
+            <span>所有 DICOM Tags</span><span class="chevron collapsed">▾</span>
+          </div>
+          <div id="allTagsContent" class="section-body collapsed">
+            <input type="text" id="tagSearchInput" placeholder="搜尋 Tag ID / 名稱 / 值…" autocomplete="off">
+            <div id="allTagsCount" class="tags-count"></div>
+            <div id="allTagsList"></div>
+          </div>
+        </div>
+
+      </div><!-- /controlsArea -->
+    </div><!-- /subPanel -->
+  </div>
+
+  <div id="statusBar">就緒 &nbsp;|&nbsp; 請使用「檔案 &gt; 載入」開啟 DICOM 檔案</div>
+  <script src="renderer.js"></script>
+</body>
+</html>
