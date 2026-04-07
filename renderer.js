@@ -2358,6 +2358,7 @@ function allTagsRenderList(dataSet, filter) {
 }
 
 let _allTagsDataSet = null;
+let _allTagsRows    = [];   // last rendered rows, for context menu
 
 function renderAllTagsList(filter) {
   if (!_allTagsDataSet) return;
@@ -2365,17 +2366,17 @@ function renderAllTagsList(filter) {
   const count = document.getElementById('allTagsCount');
   if (!list) return;
 
-  const rows = allTagsRenderList(_allTagsDataSet, filter || '');
-  count.textContent = `${rows.length} 個 tag`;
+  _allTagsRows = allTagsRenderList(_allTagsDataSet, filter || '');
+  count.textContent = `${_allTagsRows.length} 個 tag`;
   list.innerHTML = '';
 
   const frag = document.createDocumentFragment();
-  for (const r of rows) {
-    const id  = document.createElement('span'); id.className  = 'tag-id';   id.textContent = r.id;
-    const nm  = document.createElement('span'); nm.className  = 'tag-name'; nm.textContent = r.name;
-    const val = document.createElement('span'); val.className = r.binary ? 'tag-val tag-binary' : 'tag-val'; val.textContent = r.val;
+  _allTagsRows.forEach((r, i) => {
+    const id  = document.createElement('span'); id.className  = 'tag-id';   id.textContent = r.id;   id.dataset.idx = i;
+    const nm  = document.createElement('span'); nm.className  = 'tag-name'; nm.textContent = r.name; nm.dataset.idx = i;
+    const val = document.createElement('span'); val.className = r.binary ? 'tag-val tag-binary' : 'tag-val'; val.textContent = r.val; val.dataset.idx = i;
     frag.appendChild(id); frag.appendChild(nm); frag.appendChild(val);
-  }
+  });
   list.appendChild(frag);
 }
 
@@ -2392,6 +2393,62 @@ document.addEventListener('DOMContentLoaded', () => {
   if (input) {
     input.addEventListener('input', (e) => renderAllTagsList(e.target.value));
   }
+
+  // ---- Tag context menu ----
+  const ctxMenu  = document.getElementById('tagCtxMenu');
+  const tagsList = document.getElementById('allTagsList');
+  let ctxRowIdx  = -1;
+
+  const hideCtx = () => { ctxMenu.style.display = 'none'; };
+
+  tagsList.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const target = e.target.closest('[data-idx]');
+    ctxRowIdx = target ? parseInt(target.dataset.idx, 10) : -1;
+
+    // Disable row/val options if no row found
+    const hasRow = ctxRowIdx >= 0 && _allTagsRows[ctxRowIdx];
+    document.getElementById('tagCtxCopyRow').style.opacity = hasRow ? '1' : '0.4';
+    document.getElementById('tagCtxCopyRow').style.pointerEvents = hasRow ? 'auto' : 'none';
+    document.getElementById('tagCtxCopyVal').style.opacity = hasRow ? '1' : '0.4';
+    document.getElementById('tagCtxCopyVal').style.pointerEvents = hasRow ? 'auto' : 'none';
+
+    ctxMenu.style.display = 'block';
+    const x = Math.min(e.clientX, window.innerWidth  - ctxMenu.offsetWidth  - 4);
+    const y = Math.min(e.clientY, window.innerHeight - ctxMenu.offsetHeight - 4);
+    ctxMenu.style.left = x + 'px';
+    ctxMenu.style.top  = y + 'px';
+  });
+
+  document.addEventListener('click',       hideCtx);
+  document.addEventListener('contextmenu', (e) => { if (!tagsList.contains(e.target)) hideCtx(); });
+  document.addEventListener('keydown',     (e) => { if (e.key === 'Escape') hideCtx(); });
+
+  document.getElementById('tagCtxCopyAll').addEventListener('click', () => {
+    const text = _allTagsRows.map(r => `${r.id}\t${r.name}\t${r.val}`).join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+      statusBar.textContent = `已複製 ${_allTagsRows.length} 個 tag 到剪貼簿`;
+    });
+    hideCtx();
+  });
+
+  document.getElementById('tagCtxCopyRow').addEventListener('click', () => {
+    if (ctxRowIdx < 0) return;
+    const r = _allTagsRows[ctxRowIdx];
+    navigator.clipboard.writeText(`${r.id}\t${r.name}\t${r.val}`).then(() => {
+      statusBar.textContent = `已複製: ${r.id} ${r.name}`;
+    });
+    hideCtx();
+  });
+
+  document.getElementById('tagCtxCopyVal').addEventListener('click', () => {
+    if (ctxRowIdx < 0) return;
+    const r = _allTagsRows[ctxRowIdx];
+    navigator.clipboard.writeText(r.val).then(() => {
+      statusBar.textContent = `已複製值: ${r.val}`;
+    });
+    hideCtx();
+  });
 });
 
 // ==================== DICOM Loading ====================

@@ -332,6 +332,33 @@ body {
 .tag-val  { color: #c9d1d9; word-break: break-all; line-height: 1.7; }
 .tag-val.tag-binary { color: #484f58; font-style: italic; }
 
+/* ---- Tag Context Menu ---- */
+#tagCtxMenu {
+  display: none;
+  position: fixed;
+  z-index: 9999;
+  background: #1c2128;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 4px 0;
+  min-width: 220px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  font-size: 12px;
+  font-family: 'Segoe UI', sans-serif;
+}
+
+#tagCtxMenu > div {
+  padding: 8px 14px;
+  color: #c9d1d9;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#tagCtxMenu > div:hover {
+  background: #30363d;
+  color: #fff;
+}
+
 /* ---- Status Bar ---- */
 #statusBar {
   height: 22px;
