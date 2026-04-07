@@ -4,7 +4,7 @@ A desktop DICOM image viewer built with Electron and Node.js.
 
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![Electron](https://img.shields.io/badge/Electron-28-47848F)
-![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-GPL%20v2-blue)
 
 ## Features
 
@@ -73,4 +73,4 @@ npm start
 
 ## License
 
-MIT © [Anndy](https://github.com/anndymaktub)
+GPL v2 © [Anndy](https://github.com/anndymaktub)

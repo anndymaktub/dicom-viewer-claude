@@ -2,6 +2,7 @@
   "name": "dicom-viewer",
   "version": "1.0.0",
   "description": "DICOM Viewer built with Electron",
+  "license": "GPL-2.0",
   "main": "main.js",
   "scripts": {
     "start": "electron ."
