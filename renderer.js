@@ -1766,16 +1766,48 @@ function allTagsRenderList(dataSet, filter) {
     } else if (el.items) {
       val = `[Sequence, ${el.items.length} item(s)]`;
       binary = true;
-    } else if (el.length > 256) {
-      val = `[Binary, ${el.length} bytes]`;
-      binary = true;
     } else {
-      try { val = (dataSet.string(key) || '').trim().replace(/\0/g, ''); } catch (_) {}
-      if (!val) {
+      const vr = (el.vr || '').toUpperCase();
+      // Read multiple numeric values separated by '\'
+      const readNums = (reader, bytesEach) => {
         try {
-          const n = dataSet.uint16(key);
-          if (n !== undefined) val = String(n);
+          const count = Math.max(1, Math.floor((el.length || bytesEach) / bytesEach));
+          const parts = [];
+          for (let i = 0; i < count; i++) {
+            const v = reader(key, i);
+            if (v !== undefined && v !== null) parts.push(Number.isInteger(v) ? v : v.toPrecision(6));
+          }
+          return parts.join(' \\ ');
+        } catch (_) { return ''; }
+      };
+
+      if (vr === 'US')      val = readNums((k,i) => dataSet.uint16(k,i), 2);
+      else if (vr === 'SS') val = readNums((k,i) => dataSet.int16(k,i),  2);
+      else if (vr === 'UL') val = readNums((k,i) => dataSet.uint32(k,i), 4);
+      else if (vr === 'SL') val = readNums((k,i) => dataSet.int32(k,i),  4);
+      else if (vr === 'FL') val = readNums((k,i) => dataSet.float(k,i),  4);
+      else if (vr === 'FD') val = readNums((k,i) => dataSet.double(k,i), 8);
+      else if (vr === 'AT') {
+        // Attribute Tag: pairs of uint16
+        try {
+          const g = dataSet.uint16(key, 0);
+          const e2 = dataSet.uint16(key, 1);
+          if (g !== undefined && e2 !== undefined)
+            val = `(${g.toString(16).padStart(4,'0').toUpperCase()},${e2.toString(16).padStart(4,'0').toUpperCase()})`;
         } catch (_) {}
+      } else if (el.length > 512) {
+        val = `[Binary, ${el.length} bytes]`;
+        binary = true;
+      } else {
+        // String-based VR
+        try { val = (dataSet.string(key) || '').trim().replace(/\0/g, ''); } catch (_) {}
+        // Last-resort numeric fallback for unknown VR
+        if (!val && el.length === 2) {
+          try { const n = dataSet.uint16(key); if (n !== undefined) val = String(n); } catch (_) {}
+        }
+        if (!val && el.length === 4) {
+          try { const n = dataSet.uint32(key); if (n !== undefined) val = String(n); } catch (_) {}
+        }
       }
     }
 
