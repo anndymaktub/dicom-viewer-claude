@@ -7,7 +7,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-packager . \"DICOM Viewer\" --platform=win32 --arch=x64 --out=dist --overwrite"
+    "dist": "electron-packager . \"DICOM Viewer\" --platform=win32 --arch=x64 --out=dist --overwrite",
+    "dist:portable": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable"
   },
   "build": {
     "appId": "com.anndy.dicom-viewer",
@@ -15,7 +16,7 @@
     "win": {
       "target": [
         {
-          "target": "dir",
+          "target": "portable",
           "arch": [
             "x64"
           ]
@@ -40,6 +41,7 @@
     "jpeg-lossless-decoder-js": "^2.0.5"
   },
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "electron": "^28.0.0",
     "electron-builder": "^24.13.3",
     "electron-packager": "^17.1.2"

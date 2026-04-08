@@ -69,11 +69,37 @@ npm install
 # Development
 npm start
 
-# Build portable .exe
+# Build portable folder (electron-packager)
 npm run dist
+
+# Build single-file portable .exe (electron-builder)
+npm run dist:portable
 ```
 
-Output: `dist/DICOM Viewer-win32-x64/DICOM Viewer.exe` — no installation required.
+### Build outputs
+
+| Command | Output | Description |
+|---|---|---|
+| `npm run dist` | `dist/DICOM Viewer-win32-x64/DICOM Viewer.exe` | Folder-based portable |
+| `npm run dist:portable` | `dist/DICOM Viewer 1.0.0.exe` | Single-file portable exe |
+
+### Building single-file exe on Windows
+
+`npm run dist:portable` uses electron-builder with code signing disabled.
+If you get a symlink permission error, use either of these methods:
+
+**Method A — Run PowerShell as Administrator:**
+```powershell
+cd G:\dicom_veiwer_claude
+$env:CSC_IDENTITY_AUTO_DISCOVERY="false"
+npx electron-builder --win portable
+```
+
+**Method B — Enable Windows Developer Mode (recommended, one-time):**
+
+Settings → System → For developers → Developer Mode → On
+
+After enabling, `npm run dist:portable` will work in any terminal without admin rights.
 
 ## Tech Stack
 
