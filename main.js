@@ -18,6 +18,9 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
+      // TODO: 為完整安全性，應使用 bundler (esbuild/webpack) 打包 renderer.js，
+      // 然後設定 nodeIntegration: false, contextIsolation: true + preload script。
+      // 目前 renderer.js 直接 require() npm 模組，無法在隔離環境下運作。
     },
   });
 

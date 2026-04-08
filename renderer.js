@@ -115,7 +115,7 @@ function extractEncapsulatedFrame(dataSet, element) {
       const d = dataSet.byteArray;
       const off = item.dataOffset;
       // JPEG SOI = FF D8  |  JPEG Lossless SOF = FF C3  |  J2K SOC = FF 4F
-      if (d[off] === 0xFF &&
+      if (off + 1 < d.length && d[off] === 0xFF &&
           (d[off + 1] === 0xD8 || d[off + 1] === 0xC3 || d[off + 1] === 0x4F)) {
         return dataSet.byteArray.slice(off, off + item.length);
       }
@@ -368,9 +368,15 @@ function updateRenderPipelinePanel(p) {
     if (val === '' || val === undefined || val === null) return;
     const k = document.createElement('div');
     k.className = 'rp-key';
-    k.innerHTML = tag
-      ? `${key}<span class="rp-tag">(${tag})</span>`
-      : key;
+    if (tag) {
+      k.textContent = key;
+      const sp = document.createElement('span');
+      sp.className = 'rp-tag';
+      sp.textContent = `(${tag})`;
+      k.appendChild(sp);
+    } else {
+      k.textContent = key;
+    }
     const v = document.createElement('div');
     v.className = accent ? 'rp-val accent' : 'rp-val';
     v.textContent = val;
@@ -2430,7 +2436,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const text = _allTagsRows.map(r => `${r.id}\t${r.name}\t${r.val}`).join('\n');
     navigator.clipboard.writeText(text).then(() => {
       statusBar.textContent = `已複製 ${_allTagsRows.length} 個 tag 到剪貼簿`;
-    });
+    }).catch(() => { statusBar.textContent = '複製失敗'; });
     hideCtx();
   });
 
@@ -2439,7 +2445,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const r = _allTagsRows[ctxRowIdx];
     navigator.clipboard.writeText(`${r.id}\t${r.name}\t${r.val}`).then(() => {
       statusBar.textContent = `已複製: ${r.id} ${r.name}`;
-    });
+    }).catch(() => { statusBar.textContent = '複製失敗'; });
     hideCtx();
   });
 
@@ -2448,13 +2454,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const r = _allTagsRows[ctxRowIdx];
     navigator.clipboard.writeText(r.val).then(() => {
       statusBar.textContent = `已複製值: ${r.val}`;
-    });
+    }).catch(() => { statusBar.textContent = '複製失敗'; });
     hideCtx();
   });
 });
 
 // ==================== DICOM Loading ====================
 async function loadDicom(nodeBuffer, filePath) {
+  // Release previous resources
+  _allTagsDataSet = null;
+  _allTagsRows    = [];
+
   // Convert Node.js Buffer → plain Uint8Array (dicom-parser needs it)
   const uint8Array = new Uint8Array(
     nodeBuffer.buffer,
@@ -2470,7 +2480,7 @@ async function loadDicom(nodeBuffer, filePath) {
     try {
       dataSet = dicomParser.parseDicom(uint8Array, { allowInvalidVRLength: true });
     } catch (err2) {
-      throw new Error(`DICOM 解析失敗: ${err.message}`);
+      throw new Error(`DICOM 解析失敗: ${err.message} | 重試: ${err2.message}`);
     }
   }
 
@@ -2478,6 +2488,10 @@ async function loadDicom(nodeBuffer, filePath) {
   const rows = dataSet.uint16('x00280010');
   const cols = dataSet.uint16('x00280011');
   if (!rows || !cols) throw new Error('無法讀取影像尺寸 (Rows/Columns tags 缺失)');
+  const MAX_DIM = 16384;
+  if (rows > MAX_DIM || cols > MAX_DIM) {
+    throw new Error(`影像尺寸過大 (${cols}×${rows})，上限為 ${MAX_DIM}×${MAX_DIM}`);
+  }
 
   const bitsAllocated    = dataSet.uint16('x00280100') || 16;
   const bitsStored       = dataSet.uint16('x00280101') || bitsAllocated;
@@ -2557,6 +2571,7 @@ async function loadDicom(nodeBuffer, filePath) {
     const available     = src.length - offset;
     if (available < pixelByteLen) {
       console.warn(`像素資料長度不足: 需要 ${pixelByteLen}, 可用 ${available}`);
+      statusBar.textContent = `警告: 像素資料不完整 (需要 ${pixelByteLen} bytes, 僅有 ${available})`;
     }
     const pixelBytes = new Uint8Array(pixelByteLen);
     pixelBytes.set(src.subarray(offset, offset + Math.min(pixelByteLen, available)));
@@ -2670,6 +2685,10 @@ async function loadDicom(nodeBuffer, filePath) {
 
   histogramData = calculateHistogram(modalityValues, histXMin, histXMax, 256);
 
+  if (offscreenCanvas) {
+    offscreenCanvas.width = 0;
+    offscreenCanvas.height = 0;
+  }
   offscreenCanvas        = document.createElement('canvas');
   offscreenCanvas.width  = cols;
   offscreenCanvas.height = rows;
@@ -2710,6 +2729,7 @@ function applyWindowLevelToOffscreen() {
   if (!offscreenCanvas || !state.pixelValues) return;
 
   const ctx     = offscreenCanvas.getContext('2d');
+  if (!ctx) return;
   const imgData = ctx.createImageData(state.imageWidth, state.imageHeight);
   const data    = imgData.data;
   const wc        = state.windowCenter;
@@ -2850,7 +2870,7 @@ function drawPixelValueOverlay() {
 
 function drawRuler() {
   if (!state.dicomMeta.pixelSpacing) return;
-  const parts = state.dicomMeta.pixelSpacing.replace(/\\/g, '\\').split(/[\\,]/);
+  const parts = state.dicomMeta.pixelSpacing.split(/[\\/,]/);
   const mmPerPx = parseFloat(parts[0]) || 1;       // mm per source pixel
   const screenMmPerPx = mmPerPx * state.scale;      // mm per screen pixel
 
