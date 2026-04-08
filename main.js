@@ -1,6 +1,7 @@
 'use strict';
 
 const { app, BrowserWindow, Menu, dialog } = require('electron');
+const path = require('path');
 const { version } = require('./package.json');
 
 let mainWindow;
@@ -13,6 +14,7 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: '#0d1117',
     title: `DICOM Viewer v${version}`,
+    icon: path.join(__dirname, 'build', 'icon.ico'),
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
