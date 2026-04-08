@@ -14,7 +14,7 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: '#0d1117',
     title: `DICOM Viewer v${version}`,
-    icon: path.join(__dirname, 'build', 'icon.ico'),
+    icon: path.join(__dirname, 'icon', 'icon.ico'),
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,

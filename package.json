@@ -7,7 +7,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-packager . \"DICOM Viewer\" --platform=win32 --arch=x64 --out=dist --overwrite --icon=build/icon.ico",
+    "dist": "electron-packager . \"DICOM Viewer\" --platform=win32 --arch=x64 --out=dist --overwrite --icon=icon/icon.ico",
     "dist:portable": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable"
   },
   "build": {
@@ -22,7 +22,7 @@
           ]
         }
       ],
-      "icon": "build/icon.ico"
+      "icon": "icon/icon.ico"
     },
     "files": [
       "main.js",
