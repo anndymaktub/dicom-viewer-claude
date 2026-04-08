@@ -2,3 +2,4 @@ node_modules/
 dist/
 dcms/
 tags_*.txt
+build-info.json

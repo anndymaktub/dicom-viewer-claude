@@ -6,8 +6,11 @@
   "license": "GPL-2.0",
   "main": "main.js",
   "scripts": {
+    "prestart": "node scripts/generate-build-info.js",
     "start": "electron .",
+    "predist": "node scripts/generate-build-info.js",
     "dist": "electron-packager . \"DICOM Viewer\" --platform=win32 --arch=x64 --out=dist --overwrite --icon=icon/icon.ico",
+    "predist:portable": "node scripts/generate-build-info.js",
     "dist:portable": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable"
   },
   "build": {
@@ -30,6 +33,7 @@
       "index.html",
       "styles.css",
       "package.json",
+      "build-info.json",
       "node_modules/**/*"
     ],
     "extraResources": []

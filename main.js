@@ -3,6 +3,8 @@
 const { app, BrowserWindow, Menu, dialog } = require('electron');
 const path = require('path');
 const { version } = require('./package.json');
+let buildDate = '';
+try { buildDate = require('./build-info.json').buildDate; } catch (_) {}
 
 let mainWindow;
 
@@ -71,7 +73,7 @@ function createWindow() {
               type: 'info',
               title: '關於 DICOM Viewer',
               message: `DICOM Viewer`,
-              detail: `版本：v${version}\n作者：Anndy\n授權：GPL v2\n\nhttps://github.com/anndymaktub/dicom-viewer-claude`,
+              detail: `版本：v${version}\n建置：${buildDate || '(unknown)'}\n作者：Anndy\n授權：GPL v2\n\nhttps://github.com/anndymaktub/dicom-viewer-claude`,
               buttons: ['確定'],
             });
           },
