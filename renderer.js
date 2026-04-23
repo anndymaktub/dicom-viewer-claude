@@ -2319,6 +2319,28 @@ Object.assign(TAG_NAMES, {
 '00409224': 'Real World Value Intercept',
 '00409225': 'Real World Value Slope'
 });
+// Binary-numeric VRs for standard tags, used when VR is absent (Implicit VR files).
+// Only US/SS/UL/SL/FL/FD tags are listed — string VRs default to string() automatically.
+const IMPLICIT_VR_NUMERIC = {
+  // (0008) Identifying
+  '00081197':'US',
+  // (0018) Acquisition
+  '0018106C':'US','00181197':'US','00181244':'US','00181310':'US',
+  '00181404':'US','00181622':'US','00181623':'US','00181624':'US',
+  // (0028) Image Pixel — the most common numeric group
+  '00280002':'US','00280003':'US','00280006':'US',
+  '00280010':'US','00280011':'US','00280012':'US','00280014':'US',
+  '00280100':'US','00280101':'US','00280102':'US','00280103':'US',
+  '00280104':'US','00280105':'US','00280106':'US','00280107':'US',
+  '00280108':'US','00280109':'US','00280110':'US','00280111':'US',
+  '00280120':'US','00280121':'US',
+  '00281041':'SS',
+  '00283002':'SS',  // LUT Descriptor (first value signed)
+  // (5400) Waveform
+  '54000100':'US',
+  // (FFFC) Dataset Trailing Padding — skip (handled elsewhere)
+};
+
 function tagIdFromKey(key) {
   // dicom-parser keys: 'x00280010' → '0028,0010'
   const h = key.replace(/^x/, '').toUpperCase();
@@ -2385,15 +2407,18 @@ function allTagsRenderList(dataSet, filter) {
         val = `[Binary, ${el.length} bytes]`;
         binary = true;
       } else if (!el.vr) {
-        // Implicit VR — VR is not in the file, so we must infer from length.
-        // For 2-byte and 4-byte elements numeric is almost always correct (US/UL);
-        // fall back to string only for longer elements.
-        if (el.length === 2) {
-          try { const n = dataSet.uint16(key); if (n !== undefined) val = String(n); } catch (_) {}
-        } else if (el.length === 4) {
-          try { const n = dataSet.uint32(key); if (n !== undefined) val = String(n); } catch (_) {}
-        }
-        if (!val) {
+        // Implicit VR — look up the expected VR from the dictionary.
+        // Only binary-numeric tags are listed; everything else defaults to string.
+        const h = key.replace(/^x/, '').toUpperCase();
+        const ivr = IMPLICIT_VR_NUMERIC[h];
+        if      (ivr === 'US') val = readNums((k,i) => dataSet.uint16(k,i), 2);
+        else if (ivr === 'SS') val = readNums((k,i) => dataSet.int16(k,i),  2);
+        else if (ivr === 'UL') val = readNums((k,i) => dataSet.uint32(k,i), 4);
+        else if (ivr === 'SL') val = readNums((k,i) => dataSet.int32(k,i),  4);
+        else if (ivr === 'FL') val = readNums((k,i) => dataSet.float(k,i),  4);
+        else if (ivr === 'FD') val = readNums((k,i) => dataSet.double(k,i), 8);
+        else {
+          // String VR (CS, DA, DS, IS, LO, PN, AS, UI …) or unknown private tag
           try { val = (dataSet.string(key) || '').trim().replace(/\0/g, ''); } catch (_) {}
         }
       } else {
