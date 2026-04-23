@@ -1,9 +1,45 @@
 'use strict';
 
 const { ipcRenderer } = require('electron');
-const fs = require('fs');
+const fs   = require('fs');
+const path = require('path');
 const dicomParser = require('dicom-parser');
 const { version } = require('./package.json');
+
+// ==================== Decode Worker ====================
+// Persistent Web Worker for J2K WASM decode + rescale (keeps main thread free).
+// nodeIntegrationInWorker: true in main.js gives the worker access to require().
+let _decodeWorker   = null;
+let _decodeWorkerCb = null;  // { resolve, reject } for the in-flight request
+
+function getDecodeWorker() {
+  if (_decodeWorker) return _decodeWorker;
+  _decodeWorker = new Worker('./decode-worker.js');
+  _decodeWorker.onmessage = ({ data }) => {
+    const cb = _decodeWorkerCb;
+    _decodeWorkerCb = null;
+    if (!cb) return;
+    if (data.ok) cb.resolve(data);
+    else         cb.reject(new Error(data.message));
+  };
+  _decodeWorker.onerror = (err) => {
+    const cb = _decodeWorkerCb;
+    _decodeWorkerCb = null;
+    _decodeWorker   = null;  // allow recreation on next call
+    if (cb) cb.reject(err);
+  };
+  return _decodeWorker;
+}
+
+function decodeInWorker(frameData, bitsAllocated, pixelRepresentation, slope, intercept) {
+  return new Promise((resolve, reject) => {
+    _decodeWorkerCb = { resolve, reject };
+    // Copy frameData into a standalone ArrayBuffer for transfer (zero-copy to worker).
+    const buf = new ArrayBuffer(frameData.length);
+    new Uint8Array(buf).set(frameData);
+    getDecodeWorker().postMessage({ frameData: buf, bitsAllocated, pixelRepresentation, slope, intercept }, [buf]);
+  });
+}
 
 // ==================== State ====================
 const state = {
@@ -102,52 +138,59 @@ function getTransferSyntaxUID(dataSet) {
  * Works around different dicom-parser versions and BOT layouts.
  */
 function extractEncapsulatedFrame(dataSet, element) {
-  // Preferred: use dicom-parser built-in helper
+  // Preferred: use dicom-parser built-in helper (requires non-empty BOT)
   try {
     const frame = dicomParser.readEncapsulatedImageFrame(dataSet, element, 0);
     if (frame && frame.length > 0) return frame;
-  } catch (_) { /* fall through */ }
+  } catch (_) { /* fall through — common when BOT is empty */ }
 
-  // Fallback: scan items for JPEG/J2K start-of-image markers
-  if (element.items) {
-    for (const item of element.items) {
-      if (!item.length || item.length < 4) continue;
-      const d = dataSet.byteArray;
-      const off = item.dataOffset;
+  // dicom-parser exposes fragments on `.fragments` (not `.items`)
+  const fragments = element.fragments;
+  if (fragments && fragments.length > 0) {
+    // Empty BOT + single-frame file: concatenate all fragments.
+    try {
+      return dicomParser.readEncapsulatedPixelDataFromFragments(
+        dataSet, element, 0, fragments.length
+      );
+    } catch (_) { /* fall through */ }
+
+    // Fallback: scan fragments for JPEG/J2K start-of-image markers
+    const d = dataSet.byteArray;
+    for (const frag of fragments) {
+      if (!frag.length || frag.length < 4) continue;
+      const off = frag.position !== undefined ? frag.position : frag.dataOffset;
       // JPEG SOI = FF D8  |  JPEG Lossless SOF = FF C3  |  J2K SOC = FF 4F
       if (off + 1 < d.length && d[off] === 0xFF &&
           (d[off + 1] === 0xD8 || d[off + 1] === 0xC3 || d[off + 1] === 0x4F)) {
-        return dataSet.byteArray.slice(off, off + item.length);
+        return d.slice(off, off + frag.length);
       }
     }
-    // Last resort: skip BOT (item 0) and use item 1
-    if (element.items.length > 1) {
-      const it = element.items[1];
-      return dataSet.byteArray.slice(it.dataOffset, it.dataOffset + it.length);
-    }
-    if (element.items.length === 1) {
-      const it = element.items[0];
-      return dataSet.byteArray.slice(it.dataOffset, it.dataOffset + it.length);
-    }
+    // Last resort: use the first fragment
+    const f0 = fragments[0];
+    const off = f0.position !== undefined ? f0.position : f0.dataOffset;
+    return d.slice(off, off + f0.length);
   }
 
   throw new Error('無法從封裝像素資料中提取影像幀（找不到 BOT 或 fragments）');
 }
 
 // ---- JPEG 2000 singleton ----
-let _openJPEGInstance = null;
+// Cache the Promise (not just the resolved value) to avoid duplicate WASM init
+// when pre-warm and first file load overlap.
+let _openJPEGPromise = null;
 
 async function getOpenJPEGDecoder() {
-  if (_openJPEGInstance) return _openJPEGInstance;
-  let factory;
-  try {
-    factory = require('@cornerstonejs/codec-openjpeg');
-  } catch (e) {
-    throw new Error('缺少 @cornerstonejs/codec-openjpeg，請執行 npm install');
+  if (!_openJPEGPromise) {
+    let factory;
+    try {
+      factory = require('@cornerstonejs/codec-openjpeg');
+    } catch (e) {
+      throw new Error('缺少 @cornerstonejs/codec-openjpeg，請執行 npm install');
+    }
+    const fn = factory.default || factory;
+    _openJPEGPromise = (typeof fn === 'function' ? fn() : Promise.resolve(fn));
   }
-  const fn = factory.default || factory;
-  _openJPEGInstance = await (typeof fn === 'function' ? fn() : fn);
-  return _openJPEGInstance;
+  return _openJPEGPromise;
 }
 
 async function decodeJPEG2000Frame(frameData, bitsAllocated, pixelRepresentation) {
@@ -2460,10 +2503,31 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ==================== DICOM Loading ====================
+/** Yield to the browser paint cycle so the status bar actually repaints. */
+function yieldToUI() { return new Promise(r => requestAnimationFrame(r)); }
+
+/** Apply rescale slope/intercept and compute pixel min/max in one pass. */
+function applyRescale(rawPixels, slope, intercept) {
+  const count = rawPixels.length;
+  const modalityValues = new Float32Array(count);
+  let pixMin =  Infinity;
+  let pixMax = -Infinity;
+  for (let i = 0; i < count; i++) {
+    const v = rawPixels[i] * slope + intercept;
+    modalityValues[i] = v;
+    if (v < pixMin) pixMin = v;
+    if (v > pixMax) pixMax = v;
+  }
+  return { modalityValues, pixMin, pixMax };
+}
+
 async function loadDicom(nodeBuffer, filePath) {
   // Release previous resources
   _allTagsDataSet = null;
   _allTagsRows    = [];
+
+  statusBar.textContent = '解析 DICOM 格式...';
+  await yieldToUI();
 
   // Convert Node.js Buffer → plain Uint8Array (dicom-parser needs it)
   const uint8Array = new Uint8Array(
@@ -2554,14 +2618,29 @@ async function loadDicom(nodeBuffer, filePath) {
   if (!pixelDataElement) throw new Error('找不到像素資料 (tag 7FE0,0010 不存在)');
 
   const pixelCount = rows * cols;
-  let rawPixels;
+  const slope      = rescaleSlope !== 0 ? rescaleSlope : 1;
+  const intercept  = rescaleIntercept;
+
+  let modalityValues, pixMin, pixMax;
 
   if (pixelDataElement.encapsulatedPixelData) {
     // ---- Compressed path ----
     const tsUID     = getTransferSyntaxUID(dataSet);
     const frameData = extractEncapsulatedFrame(dataSet, pixelDataElement);
-    const decoded   = await decodeCompressedFrame(frameData, tsUID, bitsAllocated, pixelRepresentation);
-    rawPixels       = decoded.pixels;
+    statusBar.textContent = '解碼壓縮影像...';
+    await yieldToUI();
+
+    const isJ2K = tsUID === '1.2.840.10008.1.2.4.90' || tsUID === '1.2.840.10008.1.2.4.91';
+    if (isJ2K) {
+      // Offload WASM decode + rescale to background worker so UI stays responsive
+      const result = await decodeInWorker(frameData, bitsAllocated, pixelRepresentation, slope, intercept);
+      modalityValues = new Float32Array(result.modalityBuf);
+      pixMin         = result.pixMin;
+      pixMax         = result.pixMax;
+    } else {
+      const decoded = await decodeCompressedFrame(frameData, tsUID, bitsAllocated, pixelRepresentation);
+      ({ modalityValues, pixMin, pixMax } = applyRescale(decoded.pixels, slope, intercept));
+    }
   } else {
     // ---- Uncompressed path ----
     const bytesPerPixel = Math.ceil(bitsAllocated / 8);
@@ -2576,6 +2655,7 @@ async function loadDicom(nodeBuffer, filePath) {
     const pixelBytes = new Uint8Array(pixelByteLen);
     pixelBytes.set(src.subarray(offset, offset + Math.min(pixelByteLen, available)));
 
+    let rawPixels;
     if (bitsAllocated <= 8) {
       rawPixels = pixelRepresentation === 1
         ? new Int8Array(pixelBytes.buffer)
@@ -2589,20 +2669,9 @@ async function loadDicom(nodeBuffer, filePath) {
     } else {
       throw new Error(`不支援的位元深度: ${bitsAllocated}`);
     }
-  }
-
-  // Apply Rescale Slope / Intercept → modality values
-  // Guard: if slope is 0 (bad tag), treat as 1
-  const slope     = rescaleSlope !== 0 ? rescaleSlope : 1;
-  const intercept = rescaleIntercept;
-  const modalityValues = new Float32Array(pixelCount);
-  let pixMin =  Infinity;
-  let pixMax = -Infinity;
-  for (let i = 0; i < pixelCount; i++) {
-    const v = rawPixels[i] * slope + intercept;
-    modalityValues[i] = v;
-    if (v < pixMin) pixMin = v;
-    if (v > pixMax) pixMax = v;
+    statusBar.textContent = '處理像素資料...';
+    await yieldToUI();
+    ({ modalityValues, pixMin, pixMax } = applyRescale(rawPixels, slope, intercept));
   }
 
   // Theoretical range based on High Bit and pixel representation
@@ -2692,6 +2761,9 @@ async function loadDicom(nodeBuffer, filePath) {
   offscreenCanvas        = document.createElement('canvas');
   offscreenCanvas.width  = cols;
   offscreenCanvas.height = rows;
+
+  statusBar.textContent = '渲染影像...';
+  await yieldToUI();
 
   updateDicomInfoPanel(meta);
   updateRenderPipelinePanel(renderPipeline);
@@ -3395,3 +3467,7 @@ window.addEventListener('DOMContentLoaded', resizeCanvases);
   window.addEventListener('resize', updateScrollIndicator);
   window._updateScrollIndicator = updateScrollIndicator;
 })();
+
+// Spin up the decode worker and kick off WASM init inside it immediately,
+// so both are ready before the user opens a file.
+getDecodeWorker();

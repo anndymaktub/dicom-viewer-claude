@@ -19,6 +19,7 @@ function createWindow() {
     icon: path.join(__dirname, 'icon', 'icon.ico'),
     webPreferences: {
       nodeIntegration: true,
+      nodeIntegrationInWorker: true,
       contextIsolation: false,
       // TODO: 為完整安全性，應使用 bundler (esbuild/webpack) 打包 renderer.js，
       // 然後設定 nodeIntegration: false, contextIsolation: true + preload script。
