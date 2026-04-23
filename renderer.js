@@ -45,6 +45,7 @@ function decodeInWorker(frameData, bitsAllocated, pixelRepresentation, slope, in
 const state = {
   // Image data
   pixelValues: null,      // Float32Array of modality values (after rescale)
+  colorPixels: null,      // Uint8Array RGBRGB... (for color images)
   imageWidth: 0,
   imageHeight: 0,
 
@@ -227,7 +228,7 @@ async function decodeJPEG2000Frame(frameData, bitsAllocated, pixelRepresentation
  * Decode a compressed DICOM frame into a typed array of pixel values.
  * Returns a Promise (async) to support JPEG 2000 WASM decoding.
  */
-async function decodeCompressedFrame(frameData, tsUID, bitsAllocated, pixelRepresentation) {
+async function decodeCompressedFrame(frameData, tsUID, bitsAllocated, pixelRepresentation, samplesPerPixel = 1) {
   // ---- JPEG Baseline (Process 1 & 2-4) ----
   if (tsUID === '1.2.840.10008.1.2.4.50' || tsUID === '1.2.840.10008.1.2.4.51') {
     let jpegJs;
@@ -235,13 +236,25 @@ async function decodeCompressedFrame(frameData, tsUID, bitsAllocated, pixelRepre
     catch (e) { throw new Error('缺少 jpeg-js 模組，請執行 npm install'); }
 
     const decoded = jpegJs.decode(Buffer.from(frameData), { useTArray: true });
-    // jpeg-js always outputs RGBA; for grayscale, R=G=B
+    // jpeg-js always outputs RGBA
     const pixelCount = decoded.width * decoded.height;
-    const gray = new Uint8Array(pixelCount);
-    for (let i = 0; i < pixelCount; i++) {
-      gray[i] = decoded.data[i * 4]; // R channel
+    if (samplesPerPixel <= 1) {
+      const gray = new Uint8Array(pixelCount);
+      for (let i = 0; i < pixelCount; i++) {
+        gray[i] = decoded.data[i * 4]; // R channel
+      }
+      return { pixels: gray, width: decoded.width, height: decoded.height };
     }
-    return { pixels: gray, width: decoded.width, height: decoded.height };
+
+    const rgb = new Uint8Array(pixelCount * 3);
+    for (let i = 0; i < pixelCount; i++) {
+      const src = i * 4;
+      const dst = i * 3;
+      rgb[dst] = decoded.data[src];
+      rgb[dst + 1] = decoded.data[src + 1];
+      rgb[dst + 2] = decoded.data[src + 2];
+    }
+    return { pixels: rgb, width: decoded.width, height: decoded.height };
   }
 
   // ---- JPEG Lossless (Process 14 & SV1) ----
@@ -2622,6 +2635,47 @@ function applyRescale(rawPixels, slope, intercept) {
   return { modalityValues, pixMin, pixMax };
 }
 
+function extractRgbPixels(rawPixels, pixelCount, samplesPerPixel, planarConfig) {
+  if (!rawPixels || samplesPerPixel < 3) return null;
+
+  const rgb = new Uint8Array(pixelCount * 3);
+  if (planarConfig === 1) {
+    // RRR... GGG... BBB...
+    const planeSize = pixelCount;
+    for (let i = 0; i < pixelCount; i++) {
+      const dst = i * 3;
+      rgb[dst]     = rawPixels[i];
+      rgb[dst + 1] = rawPixels[i + planeSize];
+      rgb[dst + 2] = rawPixels[i + planeSize * 2];
+    }
+  } else {
+    // RGBRGB...
+    for (let i = 0; i < pixelCount; i++) {
+      const src = i * samplesPerPixel;
+      const dst = i * 3;
+      rgb[dst]     = rawPixels[src];
+      rgb[dst + 1] = rawPixels[src + 1];
+      rgb[dst + 2] = rawPixels[src + 2];
+    }
+  }
+  return rgb;
+}
+
+function rgbToLuma(rgbPixels) {
+  const pixelCount = Math.floor(rgbPixels.length / 3);
+  const gray = new Uint8Array(pixelCount);
+  for (let i = 0; i < pixelCount; i++) {
+    const j = i * 3;
+    // BT.601 luma approximation
+    gray[i] = Math.round(
+      rgbPixels[j] * 0.299 +
+      rgbPixels[j + 1] * 0.587 +
+      rgbPixels[j + 2] * 0.114
+    );
+  }
+  return gray;
+}
+
 async function loadDicom(nodeBuffer, filePath) {
   // Release previous resources
   _allTagsDataSet = null;
@@ -2665,6 +2719,8 @@ async function loadDicom(nodeBuffer, filePath) {
                              ? highBitRaw
                              : (bitsStored - 1);
   const pixelRepresentation = dataSet.uint16('x00280103') || 0; // 0=unsigned, 1=signed
+  const samplesPerPixel  = dataSet.uint16('x00280002') || 1;
+  const planarConfig     = dataSet.uint16('x00280006') || 0;
 
   // --- Rescale (optional tags) ---
   const rsStr = dataSet.string('x00281053');
@@ -2675,6 +2731,7 @@ async function loadDicom(nodeBuffer, filePath) {
   // --- Photometric Interpretation (0028,0004) ---
   const photoInterp = (dataSet.string('x00280004') || 'MONOCHROME2')
     .trim().toUpperCase().replace(/\0/g, '');
+  const isRgbImage = photoInterp === 'RGB' && samplesPerPixel >= 3 && bitsAllocated <= 8;
 
   // --- Extended metadata ---
   const str = (tag) => readDicomString(dataSet, tag);
@@ -2723,6 +2780,7 @@ async function loadDicom(nodeBuffer, filePath) {
   const intercept  = rescaleIntercept;
 
   let modalityValues, pixMin, pixMax;
+  let colorPixels = null;
 
   if (pixelDataElement.encapsulatedPixelData) {
     // ---- Compressed path ----
@@ -2732,20 +2790,30 @@ async function loadDicom(nodeBuffer, filePath) {
     await yieldToUI();
 
     const isJ2K = tsUID === '1.2.840.10008.1.2.4.90' || tsUID === '1.2.840.10008.1.2.4.91';
-    if (isJ2K) {
+    if (isJ2K && !isRgbImage) {
       // Offload WASM decode + rescale to background worker so UI stays responsive
       const result = await decodeInWorker(frameData, bitsAllocated, pixelRepresentation, slope, intercept);
       modalityValues = new Float32Array(result.modalityBuf);
       pixMin         = result.pixMin;
       pixMax         = result.pixMax;
     } else {
-      const decoded = await decodeCompressedFrame(frameData, tsUID, bitsAllocated, pixelRepresentation);
-      ({ modalityValues, pixMin, pixMax } = applyRescale(decoded.pixels, slope, intercept));
+      const decoded = await decodeCompressedFrame(frameData, tsUID, bitsAllocated, pixelRepresentation, samplesPerPixel);
+      if (isRgbImage) {
+        const rgb = extractRgbPixels(decoded.pixels, pixelCount, samplesPerPixel, planarConfig);
+        if (rgb && rgb.length === pixelCount * 3) {
+          colorPixels = rgb;
+          ({ modalityValues, pixMin, pixMax } = applyRescale(rgbToLuma(rgb), slope, intercept));
+        } else {
+          ({ modalityValues, pixMin, pixMax } = applyRescale(decoded.pixels, slope, intercept));
+        }
+      } else {
+        ({ modalityValues, pixMin, pixMax } = applyRescale(decoded.pixels, slope, intercept));
+      }
     }
   } else {
     // ---- Uncompressed path ----
     const bytesPerPixel = Math.ceil(bitsAllocated / 8);
-    const pixelByteLen  = pixelCount * bytesPerPixel;
+    const pixelByteLen  = pixelCount * samplesPerPixel * bytesPerPixel;
     const offset        = pixelDataElement.dataOffset;
     const src           = dataSet.byteArray;
     const available     = src.length - offset;
@@ -2772,7 +2840,17 @@ async function loadDicom(nodeBuffer, filePath) {
     }
     statusBar.textContent = '處理像素資料...';
     await yieldToUI();
-    ({ modalityValues, pixMin, pixMax } = applyRescale(rawPixels, slope, intercept));
+    if (isRgbImage) {
+      const rgb = extractRgbPixels(rawPixels, pixelCount, samplesPerPixel, planarConfig);
+      if (rgb && rgb.length === pixelCount * 3) {
+        colorPixels = rgb;
+        ({ modalityValues, pixMin, pixMax } = applyRescale(rgbToLuma(rgb), slope, intercept));
+      } else {
+        ({ modalityValues, pixMin, pixMax } = applyRescale(rawPixels, slope, intercept));
+      }
+    } else {
+      ({ modalityValues, pixMin, pixMax } = applyRescale(rawPixels, slope, intercept));
+    }
   }
 
   // Theoretical range based on High Bit and pixel representation
@@ -2806,6 +2884,7 @@ async function loadDicom(nodeBuffer, filePath) {
 
   // --- Update global state ---
   state.pixelValues       = modalityValues;
+  state.colorPixels       = colorPixels;
   state.imageWidth        = cols;
   state.imageHeight       = rows;
   state.windowCenter      = wc;
@@ -2826,8 +2905,8 @@ async function loadDicom(nodeBuffer, filePath) {
     bitsStored,
     highBit,
     pixelRepresentation,
-    samplesPerPixel:    dataSet.uint16('x00280002') || 1,
-    planarConfig:       dataSet.uint16('x00280006') || 0,
+    samplesPerPixel,
+    planarConfig,
     // ② Modality LUT
     rescaleSlope:       rescaleSlope !== 0 ? rescaleSlope : 1,
     rescaleIntercept,
@@ -2905,6 +2984,21 @@ function applyWindowLevelToOffscreen() {
   if (!ctx) return;
   const imgData = ctx.createImageData(state.imageWidth, state.imageHeight);
   const data    = imgData.data;
+
+  if (state.colorPixels) {
+    const count = state.imageWidth * state.imageHeight;
+    for (let i = 0; i < count; i++) {
+      const src = i * 3;
+      const dst = i * 4;
+      data[dst]     = state.colorPixels[src];
+      data[dst + 1] = state.colorPixels[src + 1];
+      data[dst + 2] = state.colorPixels[src + 2];
+      data[dst + 3] = 255;
+    }
+    ctx.putImageData(imgData, 0, 0);
+    return;
+  }
+
   const wc        = state.windowCenter;
   const ww        = Math.max(state.windowWidth, 1);
   const wMin      = wc - ww / 2;
