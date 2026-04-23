@@ -77,6 +77,8 @@ const state = {
   histDragStartX: 0,
   histDragStartWC: 0,
   histDragStartWW: 0,
+  histCursorX: null,
+  histCursorY: null,
 
   // Photometric interpretation
   photometricInterp: 'MONOCHROME2',
@@ -323,6 +325,45 @@ function formatSpacing(raw) {
   if (!raw) return '';
   const parts = raw.replace(/\\/g, '\\').split(/[\\,]/).map(v => parseFloat(v).toFixed(3));
   return parts.join(' × ');
+}
+
+function getDicomTextEncoding(dataSet) {
+  const charsetRaw = (dataSet.string('x00080005') || '').replace(/\0/g, '').trim().toUpperCase();
+  const charsets = charsetRaw.split('\\').map(s => s.trim()).filter(Boolean);
+  return charsets.includes('ISO_IR 192') ? 'utf-8' : 'big5';
+}
+
+const CUSTOM_CHARSET_TAGS = new Set([
+  'X00100010', // Patient Name
+  'X00080080', // Institution Name
+]);
+
+function readDicomString(dataSet, tag) {
+  const normTag = String(tag || '').toUpperCase();
+  if (!CUSTOM_CHARSET_TAGS.has(normTag)) {
+    try {
+      return (dataSet.string(tag) || '').replace(/\0/g, '').trim();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  try {
+    const element = dataSet.elements[tag];
+    if (!element || !element.length) return '';
+    const start = element.dataOffset;
+    const end = start + element.length;
+    if (start < 0 || end > dataSet.byteArray.length) return '';
+    const bytes = dataSet.byteArray.subarray(start, end);
+    const decoder = new TextDecoder(getDicomTextEncoding(dataSet), { fatal: false });
+    return decoder.decode(bytes).replace(/\0/g, '').trim();
+  } catch (_) {
+    try {
+      return (dataSet.string(tag) || '').replace(/\0/g, '').trim();
+    } catch (_) {
+      return '';
+    }
+  }
 }
 
 function updateDicomInfoPanel(meta) {
@@ -2386,7 +2427,12 @@ function tagNameFromKey(key, el) {
 function allTagsRenderList(dataSet, filter) {
   const fl = filter.toLowerCase();
   const rows = [];
-  for (const key of Object.keys(dataSet.elements)) {
+  const sortedKeys = Object.keys(dataSet.elements).sort((a, b) => {
+    const ah = a.replace(/^x/, '').toUpperCase();
+    const bh = b.replace(/^x/, '').toUpperCase();
+    return ah.localeCompare(bh);
+  });
+  for (const key of sortedKeys) {
     const el  = dataSet.elements[key];
     const id  = tagIdFromKey(key);
     const name = tagNameFromKey(key, el);
@@ -2435,7 +2481,7 @@ function allTagsRenderList(dataSet, filter) {
         // Implicit VR — look up the expected VR from the dictionary.
         // Only binary-numeric tags are listed; everything else defaults to string.
         const h = key.replace(/^x/, '').toUpperCase();
-        const ivr = IMPLICIT_VR_NUMERIC[h];
+        const ivr = h.endsWith('0000') ? 'UL' : IMPLICIT_VR_NUMERIC[h];
         if      (ivr === 'US') val = readNums((k,i) => dataSet.uint16(k,i), 2);
         else if (ivr === 'SS') val = readNums((k,i) => dataSet.int16(k,i),  2);
         else if (ivr === 'UL') val = readNums((k,i) => dataSet.uint32(k,i), 4);
@@ -2444,11 +2490,11 @@ function allTagsRenderList(dataSet, filter) {
         else if (ivr === 'FD') val = readNums((k,i) => dataSet.double(k,i), 8);
         else {
           // String VR (CS, DA, DS, IS, LO, PN, AS, UI …) or unknown private tag
-          try { val = (dataSet.string(key) || '').trim().replace(/\0/g, ''); } catch (_) {}
+          try { val = readDicomString(dataSet, key); } catch (_) {}
         }
       } else {
         // Explicit string VR (LO, SH, PN, CS, DA, TM, UI …)
-        try { val = (dataSet.string(key) || '').trim().replace(/\0/g, ''); } catch (_) {}
+        try { val = readDicomString(dataSet, key); } catch (_) {}
       }
     }
 
@@ -2631,7 +2677,7 @@ async function loadDicom(nodeBuffer, filePath) {
     .trim().toUpperCase().replace(/\0/g, '');
 
   // --- Extended metadata ---
-  const str = (tag) => (dataSet.string(tag) || '').trim().replace(/\0/g, '');
+  const str = (tag) => readDicomString(dataSet, tag);
   const meta = {
     patientName:     formatDicomName(str('x00100010')),
     patientId:       str('x00100020'),
@@ -2785,17 +2831,17 @@ async function loadDicom(nodeBuffer, filePath) {
     // ② Modality LUT
     rescaleSlope:       rescaleSlope !== 0 ? rescaleSlope : 1,
     rescaleIntercept,
-    rescaleType:        (dataSet.string('x00281054') || '').trim().replace(/\0/g, ''),
+    rescaleType:        readDicomString(dataSet, 'x00281054'),
     pixelMin:           pixMin,
     pixelMax:           pixMax,
     // ③ VOI LUT
     wcFromTag:          wc,
     wwFromTag:          ww,
     wcWwSource:         (wcRaw && wwRaw) ? 'DICOM Tag (0028,1050/1051)' : '自動計算（Tag 缺失）',
-    wwExplanation:      (dataSet.string('x00281055') || '').trim().replace(/\0/g, ''),
+    wwExplanation:      readDicomString(dataSet, 'x00281055'),
     // ④ 光度詮釋
     photometric:        photoInterp,
-    pixelAspectRatio:   (dataSet.string('x00280034') || '').trim().replace(/\0/g, ''),
+    pixelAspectRatio:   readDicomString(dataSet, 'x00280034'),
   };
 
   state.photometricInterp = photoInterp;
@@ -3176,6 +3222,61 @@ function renderHistogram() {
   histCtx.textAlign = 'left';
   histCtx.fillText(`WC: ${Math.round(state.windowCenter)}`, M.left + 6, M.top + 13);
   histCtx.fillText(`WW: ${Math.round(state.windowWidth)}`,  M.left + 6, M.top + 26);
+
+  // --- Mouse crosshair + tooltip ---
+  if (state.histCursorX !== null) {
+    const cx = state.histCursorX;
+    const cy = state.histCursorY;
+    if (cx >= M.left && cx <= M.left + drawW && cy >= M.top && cy <= M.top + drawH) {
+      // X value (pixel intensity)
+      const xVal = state.histXMin + (cx - M.left) / drawW * (state.histXMax - state.histXMin);
+      // Find bin at cursor
+      const binIdx = Math.floor((cx - M.left) / drawW * numBins);
+      const clampedBin = Math.max(0, Math.min(numBins - 1, binIdx));
+      const yCount = histogramData[clampedBin] ? histogramData[clampedBin].count : 0;
+
+      // Crosshair lines
+      histCtx.save();
+      histCtx.strokeStyle = 'rgba(255,255,255,0.35)';
+      histCtx.lineWidth   = 1;
+      histCtx.setLineDash([3, 3]);
+      histCtx.beginPath();
+      histCtx.moveTo(cx, M.top);
+      histCtx.lineTo(cx, M.top + drawH);
+      histCtx.stroke();
+      histCtx.beginPath();
+      histCtx.moveTo(M.left, cy);
+      histCtx.lineTo(M.left + drawW, cy);
+      histCtx.stroke();
+      histCtx.setLineDash([]);
+
+      // Tooltip box
+      const label1 = `X: ${Math.round(xVal)}`;
+      const label2 = `Y: ${yCount}`;
+      histCtx.font = '11px Consolas, monospace';
+      const tw = Math.max(histCtx.measureText(label1).width, histCtx.measureText(label2).width);
+      const bw = tw + 14;
+      const bh = 34;
+      let bx = cx + 10;
+      let by = cy - bh - 6;
+      if (bx + bw > M.left + drawW) bx = cx - bw - 10;
+      if (by < M.top)               by = cy + 8;
+
+      histCtx.fillStyle = 'rgba(13,17,23,0.85)';
+      histCtx.strokeStyle = 'rgba(255,255,255,0.25)';
+      histCtx.lineWidth = 1;
+      histCtx.beginPath();
+      histCtx.roundRect(bx, by, bw, bh, 4);
+      histCtx.fill();
+      histCtx.stroke();
+
+      histCtx.fillStyle = '#e6edf3';
+      histCtx.textAlign = 'left';
+      histCtx.fillText(label1, bx + 7, by + 13);
+      histCtx.fillText(label2, bx + 7, by + 27);
+      histCtx.restore();
+    }
+  }
 }
 
 // ==================== Combined Render ====================
@@ -3230,6 +3331,11 @@ histCanvas.addEventListener('mousedown', (e) => {
 
 histCanvas.addEventListener('mousemove', (e) => {
   const mouseX = getHistMouseX(e);
+  const rect   = histCanvas.getBoundingClientRect();
+  const scaleY = histCanvas.height / rect.height;
+  const mouseY = (e.clientY - rect.top) * scaleY;
+  state.histCursorX = mouseX;
+  state.histCursorY = mouseY;
 
   if (!state.histDragging) {
     if (!histogramData) return;
@@ -3245,6 +3351,7 @@ histCanvas.addEventListener('mousemove', (e) => {
     } else {
       histCanvas.style.cursor = 'crosshair';
     }
+    renderHistogram();
     return;
   }
 
@@ -3337,6 +3444,12 @@ mainCanvas.addEventListener('mouseleave', () => {
 mainCanvas.addEventListener('mouseup', () => {
   state.isPanning = false;
   mainCanvas.style.cursor = 'default';
+});
+
+histCanvas.addEventListener('mouseleave', () => {
+  state.histCursorX = null;
+  state.histCursorY = null;
+  renderHistogram();
 });
 
 // Global mouseup to end histogram drag even if cursor leaves canvas
