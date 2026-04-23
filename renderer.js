@@ -2319,26 +2319,51 @@ Object.assign(TAG_NAMES, {
 '00409224': 'Real World Value Intercept',
 '00409225': 'Real World Value Slope'
 });
-// Binary-numeric VRs for standard tags, used when VR is absent (Implicit VR files).
-// Only US/SS/UL/SL/FL/FD tags are listed — string VRs default to string() automatically.
+// Binary-numeric VRs for standard tags used when VR is absent (Implicit VR files).
+// Only US/SS/UL/SL/FL/FD entries — all string VRs (CS/DA/DS/IS/LO/PN/…) default to string().
 const IMPLICIT_VR_NUMERIC = {
+  // (0002) File Meta
+  '00020000':'UL',
   // (0008) Identifying
   '00081197':'US',
-  // (0018) Acquisition
-  '0018106C':'US','00181197':'US','00181244':'US','00181310':'US',
+  // (0018) Acquisition — US
+  '0018106C':'UL','00181197':'US','00181244':'US','00181310':'US',
   '00181404':'US','00181622':'US','00181623':'US','00181624':'US',
-  // (0028) Image Pixel — the most common numeric group
+  '00189127':'UL','00189234':'UL',
+  '00189240':'US','00189241':'US','00189337':'US',
+  '00189219':'SS',
+  // (0018) Acquisition — FD (CT/MR floating-point parameters)
+  '00189073':'FD','00189098':'FD',
+  '00189104':'FD','00189105':'FD','00189106':'FD',
+  '00189153':'FD','00189154':'FD','00189155':'FD',
+  '00189168':'FD','00189181':'FD','00189182':'FD','00189184':'FD',
+  '00189196':'FD','00189197':'FD',
+  '00189217':'FD','00189218':'FD','00189220':'FD','00189232':'FD',
+  '00189295':'FD',
+  '00189303':'FD','00189305':'FD','00189306':'FD','00189307':'FD',
+  '00189309':'FD','00189310':'FD','00189311':'FD','00189313':'FD',
+  '00189317':'FD','00189318':'FD','00189319':'FD',
+  '00189322':'FD','00189324':'FD',
+  '00189327':'FD','00189328':'FD','00189330':'FD','00189332':'FD',
+  '00189335':'FD',
+  // (0020) Relationship — UL/FL/FD
+  '00209057':'UL','00209128':'UL','00209157':'UL','00209228':'UL',
+  '00209156':'US','00209162':'US','00209163':'US',
+  '00209241':'FL','00209245':'FL','00209246':'FL','00209248':'FL',
+  '00209251':'FD','00209252':'FD',
+  '00209254':'FD','00209255':'FD','00209256':'FD','00209257':'FD',
+  // (0028) Image Pixel — US/SS
   '00280002':'US','00280003':'US','00280006':'US',
   '00280010':'US','00280011':'US','00280012':'US','00280014':'US',
   '00280100':'US','00280101':'US','00280102':'US','00280103':'US',
   '00280104':'US','00280105':'US','00280106':'US','00280107':'US',
   '00280108':'US','00280109':'US','00280110':'US','00280111':'US',
   '00280120':'US','00280121':'US',
-  '00281041':'SS',
-  '00283002':'SS',  // LUT Descriptor (first value signed)
+  '00281041':'SS','00283002':'SS',
+  // (0040) Modality Worklist — FD
+  '00409224':'FD','00409225':'FD',
   // (5400) Waveform
   '54000100':'US',
-  // (FFFC) Dataset Trailing Padding — skip (handled elsewhere)
 };
 
 function tagIdFromKey(key) {
