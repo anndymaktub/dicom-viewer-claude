@@ -2384,16 +2384,21 @@ function allTagsRenderList(dataSet, filter) {
       } else if (el.length > 512) {
         val = `[Binary, ${el.length} bytes]`;
         binary = true;
-      } else {
-        // String-based VR
-        try { val = (dataSet.string(key) || '').trim().replace(/\0/g, ''); } catch (_) {}
-        // Last-resort numeric fallback for unknown VR
-        if (!val && el.length === 2) {
+      } else if (!el.vr) {
+        // Implicit VR — VR is not in the file, so we must infer from length.
+        // For 2-byte and 4-byte elements numeric is almost always correct (US/UL);
+        // fall back to string only for longer elements.
+        if (el.length === 2) {
           try { const n = dataSet.uint16(key); if (n !== undefined) val = String(n); } catch (_) {}
-        }
-        if (!val && el.length === 4) {
+        } else if (el.length === 4) {
           try { const n = dataSet.uint32(key); if (n !== undefined) val = String(n); } catch (_) {}
         }
+        if (!val) {
+          try { val = (dataSet.string(key) || '').trim().replace(/\0/g, ''); } catch (_) {}
+        }
+      } else {
+        // Explicit string VR (LO, SH, PN, CS, DA, TM, UI …)
+        try { val = (dataSet.string(key) || '').trim().replace(/\0/g, ''); } catch (_) {}
       }
     }
 
