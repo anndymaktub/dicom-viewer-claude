@@ -73,8 +73,9 @@ body {
 
 #histContainer {
   height: 220px;
-  min-height: 80px;
+  min-height: 120px;
   overflow: hidden;
+  position: relative;
   flex-shrink: 0;
 }
 
@@ -93,6 +94,76 @@ body {
 #histCanvas {
   display: block;
   cursor: crosshair;
+}
+
+#histToolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  z-index: 4;
+}
+
+.hist-tool-btn {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  background: rgba(22, 27, 34, 0.86);
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.hist-tool-btn:hover {
+  color: #ffffff;
+  border-color: #58a6ff;
+  background: rgba(31, 62, 90, 0.94);
+}
+
+.hist-tool-btn.active {
+  color: #ffffff;
+  border-color: #7ee787;
+  background: rgba(35, 92, 67, 0.94);
+}
+
+.hist-tool-btn:disabled {
+  color: #484f58;
+  border-color: #21262d;
+  cursor: default;
+  opacity: 0.7;
+}
+
+.hist-tool-btn svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#histResizeGrip {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nesw-resize;
+  z-index: 3;
+  background:
+    linear-gradient(135deg, transparent 45%, #58a6ff 46%, #58a6ff 52%, transparent 53%),
+    linear-gradient(135deg, transparent 60%, #7ee787 61%, #7ee787 67%, transparent 68%);
+  opacity: 0.8;
+}
+
+#histResizeGrip:hover,
+#histResizeGrip.dragging {
+  opacity: 1;
 }
 
 /* ---- Controls Wrap + Scroll fade ---- */

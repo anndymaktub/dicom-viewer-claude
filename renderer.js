@@ -58,6 +58,8 @@ const state = {
   // Histogram axis range
   histXMin: 0,
   histXMax: 1,
+  histFullXMin: 0,
+  histFullXMax: 1,
   pixelMin: 0,
   pixelMax: 1,
 
@@ -74,10 +76,13 @@ const state = {
   panStartTy: 0,
 
   // Histogram W/C drag interaction
-  histDragging: null,     // null | 'left' | 'right' | 'center'
+  histDragging: null,     // null | 'left' | 'right' | 'center' | 'pan'
+  histPanMode: false,
   histDragStartX: 0,
   histDragStartWC: 0,
   histDragStartWW: 0,
+  histDragStartMin: 0,
+  histDragStartMax: 1,
   histCursorX: null,
   histCursorY: null,
 
@@ -111,6 +116,10 @@ const mainCtx       = mainCanvas.getContext('2d');
 const histContainer = document.getElementById('histContainer');
 const histCanvas    = document.getElementById('histCanvas');
 const histCtx       = histCanvas.getContext('2d');
+const histZoomInBtn    = document.getElementById('histZoomInBtn');
+const histZoomOutBtn   = document.getElementById('histZoomOutBtn');
+const histZoomResetBtn = document.getElementById('histZoomResetBtn');
+const histPanBtn       = document.getElementById('histPanBtn');
 const wcDisplay          = document.getElementById('wcDisplay');
 const wwDisplay          = document.getElementById('wwDisplay');
 const resetBtn           = document.getElementById('resetBtn');
@@ -2900,6 +2909,10 @@ async function loadDicom(nodeBuffer, filePath) {
   state.pixelMax          = pixMax;
   state.histXMin          = histXMin;
   state.histXMax          = histXMax;
+  state.histFullXMin      = histXMin;
+  state.histFullXMax      = histXMax;
+  state.histPanMode       = false;
+  state.histDragging      = null;
   const tsUID = getTransferSyntaxUID(dataSet);
   const renderPipeline = {
     // ① 像素解碼
@@ -3252,6 +3265,7 @@ function renderHistogram() {
     histCtx.fillStyle = '#484f58';
     histCtx.font      = '13px sans-serif';
     histCtx.textAlign = 'center';
+    updateHistogramZoomButtons();
     histCtx.fillText('無資料', W / 2, H / 2);
     return;
   }
@@ -3266,7 +3280,7 @@ function renderHistogram() {
   const binPxW   = drawW / numBins;
 
   // --- Histogram bars ---
-  histCtx.fillStyle = '#1a5276';
+  histCtx.fillStyle = 'rgba(86, 211, 255, 0.88)';
   for (let i = 0; i < numBins; i++) {
     const count = histogramData[i].count;
     if (count <= 0) continue;
@@ -3417,6 +3431,7 @@ function renderHistogram() {
       histCtx.restore();
     }
   }
+  updateHistogramZoomButtons();
 }
 
 // ==================== Combined Render ====================
@@ -3433,6 +3448,84 @@ function updateInfoDisplay() {
 }
 
 // ==================== Histogram Interaction ====================
+function clampValue(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function refreshHistogramData() {
+  if (!state.pixelValues) return;
+  histogramData = calculateHistogram(state.pixelValues, state.histXMin, state.histXMax, 256);
+}
+
+function setHistogramRange(nextMin, nextMax) {
+  if (!state.pixelValues) return false;
+  const fullMin = state.histFullXMin;
+  const fullMax = state.histFullXMax;
+  const fullRange = Math.max(fullMax - fullMin, 1);
+  const rawStep = histogramStats ? Math.abs(histogramStats.valueStep || 1) : 1;
+  const minRange = Math.max(rawStep * 4, fullRange / 10000);
+  let range = Math.max(nextMax - nextMin, minRange);
+  range = Math.min(range, fullRange);
+
+  const half = range / 2;
+  const center = clampValue((nextMin + nextMax) / 2, fullMin + half, fullMax - half);
+  state.histXMin = center - half;
+  state.histXMax = center + half;
+  refreshHistogramData();
+  return true;
+}
+
+function getHistogramAnchorValue() {
+  const drawW = histCanvas.width - M.left - M.right;
+  if (state.histCursorX !== null && state.histCursorX >= M.left && state.histCursorX <= M.left + drawW) {
+    return histXToVal(state.histCursorX);
+  }
+  if (state.windowCenter >= state.histXMin && state.windowCenter <= state.histXMax) {
+    return state.windowCenter;
+  }
+  return (state.histXMin + state.histXMax) / 2;
+}
+
+function zoomHistogram(factor, anchorValue = getHistogramAnchorValue()) {
+  if (!histogramData) return;
+  const currentRange = state.histXMax - state.histXMin;
+  anchorValue = clampValue(anchorValue, state.histXMin, state.histXMax);
+  const nextRange = currentRange * factor;
+  const anchorRatio = (anchorValue - state.histXMin) / currentRange;
+  const nextMin = anchorValue - nextRange * anchorRatio;
+  const nextMax = nextMin + nextRange;
+  if (setHistogramRange(nextMin, nextMax)) renderHistogram();
+}
+
+function resetHistogramZoom() {
+  if (!histogramData) return;
+  state.histPanMode = false;
+  if (setHistogramRange(state.histFullXMin, state.histFullXMax)) renderHistogram();
+}
+
+function isHistogramZoomed() {
+  const fullRange = Math.max(state.histFullXMax - state.histFullXMin, 1);
+  return Math.abs(state.histXMin - state.histFullXMin) > fullRange * 1e-6 ||
+         Math.abs(state.histXMax - state.histFullXMax) > fullRange * 1e-6;
+}
+
+function updateHistogramZoomButtons() {
+  if (!histZoomInBtn || !histZoomOutBtn || !histZoomResetBtn || !histPanBtn) return;
+  const fullRange = Math.max(state.histFullXMax - state.histFullXMin, 1);
+  const range = Math.max(state.histXMax - state.histXMin, 1);
+  const rawStep = histogramStats ? Math.abs(histogramStats.valueStep || 1) : 1;
+  const minRange = Math.max(rawStep * 4, fullRange / 10000);
+  const zoomed = isHistogramZoomed();
+  const isFullRange = !zoomed;
+  histZoomInBtn.disabled = !histogramData || range <= minRange * 1.01;
+  histZoomOutBtn.disabled = !histogramData || isFullRange;
+  histZoomResetBtn.disabled = !histogramData || isFullRange;
+  histPanBtn.disabled = !histogramData || isFullRange;
+  if (histPanBtn.disabled) state.histPanMode = false;
+  histPanBtn.classList.toggle('active', state.histPanMode);
+  histPanBtn.setAttribute('aria-pressed', state.histPanMode ? 'true' : 'false');
+}
+
 function histValToX(v) {
   const drawW = histCanvas.width - M.left - M.right;
   return M.left + (v - state.histXMin) / (state.histXMax - state.histXMin) * drawW;
@@ -3443,13 +3536,25 @@ function histXToVal(x) {
   return state.histXMin + (x - M.left) / drawW * (state.histXMax - state.histXMin);
 }
 
+function histXToValInRange(x, min, max) {
+  const drawW = histCanvas.width - M.left - M.right;
+  return min + (x - M.left) / drawW * (max - min);
+}
+
 function getHistMouseX(e) {
   const rect = histCanvas.getBoundingClientRect();
   return (e.clientX - rect.left) * (histCanvas.width / rect.width);
 }
 
+function startHistogramPan(mouseX) {
+  state.histDragging = 'pan';
+  state.histDragStartX = mouseX;
+  state.histDragStartMin = state.histXMin;
+  state.histDragStartMax = state.histXMax;
+}
+
 histCanvas.addEventListener('mousedown', (e) => {
-  if (!histogramData) return;
+  if (e.button !== 0 || !histogramData) return;
 
   const mouseX  = getHistMouseX(e);
   const wMin    = state.windowCenter - state.windowWidth / 2;
@@ -3457,10 +3562,19 @@ histCanvas.addEventListener('mousedown', (e) => {
   const xWMin   = histValToX(wMin);
   const xWMax   = histValToX(wMax);
   const thresh  = 9;
+  const zoomed  = isHistogramZoomed();
 
-  if      (Math.abs(mouseX - xWMin) <= thresh)              state.histDragging = 'left';
-  else if (Math.abs(mouseX - xWMax) <= thresh)              state.histDragging = 'right';
-  else if (mouseX > xWMin + thresh && mouseX < xWMax - thresh) state.histDragging = 'center';
+  if (state.histPanMode && zoomed) {
+    startHistogramPan(mouseX);
+  } else if (Math.abs(mouseX - xWMin) <= thresh) {
+    state.histDragging = 'left';
+  } else if (Math.abs(mouseX - xWMax) <= thresh) {
+    state.histDragging = 'right';
+  } else if (mouseX > xWMin + thresh && mouseX < xWMax - thresh) {
+    state.histDragging = 'center';
+  } else if (zoomed) {
+    startHistogramPan(mouseX);
+  }
   else return;
 
   state.histDragStartX  = mouseX;
@@ -3484,9 +3598,14 @@ histCanvas.addEventListener('mousemove', (e) => {
     const xWMin  = histValToX(wMin);
     const xWMax  = histValToX(wMax);
     const thresh = 9;
-    if (Math.abs(mouseX - xWMin) <= thresh || Math.abs(mouseX - xWMax) <= thresh) {
+    const zoomed = isHistogramZoomed();
+    if (state.histPanMode && zoomed) {
+      histCanvas.style.cursor = 'grab';
+    } else if (Math.abs(mouseX - xWMin) <= thresh || Math.abs(mouseX - xWMax) <= thresh) {
       histCanvas.style.cursor = 'ew-resize';
     } else if (mouseX > xWMin && mouseX < xWMax) {
+      histCanvas.style.cursor = 'grab';
+    } else if (zoomed) {
       histCanvas.style.cursor = 'grab';
     } else {
       histCanvas.style.cursor = 'crosshair';
@@ -3497,7 +3616,15 @@ histCanvas.addEventListener('mousemove', (e) => {
 
   const dv = histXToVal(mouseX) - histXToVal(state.histDragStartX);
 
-  if (state.histDragging === 'center') {
+  if (state.histDragging === 'pan') {
+    const panDv = histXToValInRange(mouseX, state.histDragStartMin, state.histDragStartMax) -
+                  histXToValInRange(state.histDragStartX, state.histDragStartMin, state.histDragStartMax);
+    setHistogramRange(state.histDragStartMin - panDv, state.histDragStartMax - panDv);
+    histCanvas.style.cursor = 'grabbing';
+    renderHistogram();
+    return;
+
+  } else if (state.histDragging === 'center') {
     state.windowCenter = state.histDragStartWC + dv;
 
   } else if (state.histDragging === 'left') {
@@ -3517,6 +3644,33 @@ histCanvas.addEventListener('mousemove', (e) => {
 
   renderAll();
 });
+
+histCanvas.addEventListener('wheel', (e) => {
+  if (!histogramData) return;
+  e.preventDefault();
+
+  const mouseX = getHistMouseX(e);
+  const anchor = histXToVal(mouseX);
+  const factor = e.deltaY > 0 ? 1.45 : 1 / 1.45;
+  zoomHistogram(factor, anchor);
+}, { passive: false });
+
+if (histZoomInBtn) {
+  histZoomInBtn.addEventListener('click', () => zoomHistogram(0.5));
+}
+if (histZoomOutBtn) {
+  histZoomOutBtn.addEventListener('click', () => zoomHistogram(2));
+}
+if (histZoomResetBtn) {
+  histZoomResetBtn.addEventListener('click', resetHistogramZoom);
+}
+if (histPanBtn) {
+  histPanBtn.addEventListener('click', () => {
+    if (!histogramData || !isHistogramZoomed()) return;
+    state.histPanMode = !state.histPanMode;
+    renderHistogram();
+  });
+}
 
 // ==================== Main Canvas Events ====================
 mainCanvas.addEventListener('wheel', (e) => {
@@ -3596,7 +3750,7 @@ histCanvas.addEventListener('mouseleave', () => {
 document.addEventListener('mouseup', () => {
   if (state.histDragging) {
     state.histDragging = null;
-    histCanvas.style.cursor = 'crosshair';
+    histCanvas.style.cursor = state.histPanMode && isHistogramZoomed() ? 'grab' : 'crosshair';
   }
   if (state.isPanning) {
     state.isPanning = false;
@@ -3709,6 +3863,7 @@ window.addEventListener('DOMContentLoaded', resizeCanvases);
     const dx = startX - e.clientX;
     const minW = 200, maxW = layout.offsetWidth - 200;
     subPanel.style.width = Math.max(minW, Math.min(maxW, startWidth + dx)) + 'px';
+    resizeCanvases();
   });
 
   document.addEventListener('mouseup', () => {
@@ -3742,9 +3897,10 @@ window.addEventListener('DOMContentLoaded', resizeCanvases);
   document.addEventListener('mousemove', (e) => {
     if (!dragging) return;
     const dy   = e.clientY - startY;
-    const minH = 60;
+    const minH = 120;
     const maxH = subPanel.offsetHeight - 120;
     histCont.style.height = Math.max(minH, Math.min(maxH, startH + dy)) + 'px';
+    resizeCanvases();
     if (window._updateScrollIndicator) window._updateScrollIndicator();
   });
 
@@ -3752,6 +3908,54 @@ window.addEventListener('DOMContentLoaded', resizeCanvases);
     if (!dragging) return;
     dragging = false;
     divider.classList.remove('dragging');
+    document.body.style.cursor     = '';
+    document.body.style.userSelect = '';
+    resizeCanvases();
+    if (window._updateScrollIndicator) window._updateScrollIndicator();
+  });
+})();
+
+// ==================== Histogram Corner Resize Grip ====================
+(function () {
+  const grip     = document.getElementById('histResizeGrip');
+  const histCont = document.getElementById('histContainer');
+  const subPanel = document.getElementById('subPanel');
+  const layout   = document.getElementById('layout');
+  if (!grip || !histCont || !subPanel || !layout) return;
+
+  let dragging = false, startX = 0, startY = 0, startWidth = 0, startH = 0;
+
+  grip.addEventListener('mousedown', (e) => {
+    dragging   = true;
+    startX     = e.clientX;
+    startY     = e.clientY;
+    startWidth = subPanel.offsetWidth;
+    startH     = histCont.offsetHeight;
+    grip.classList.add('dragging');
+    document.body.style.cursor     = 'nesw-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+
+    const dx   = startX - e.clientX;
+    const dy   = e.clientY - startY;
+    const minW = 200, maxW = layout.offsetWidth - 200;
+    const minH = 120, maxH = subPanel.offsetHeight - 120;
+
+    subPanel.style.width  = Math.max(minW, Math.min(maxW, startWidth + dx)) + 'px';
+    histCont.style.height = Math.max(minH, Math.min(maxH, startH + dy)) + 'px';
+    resizeCanvases();
+    if (window._updateScrollIndicator) window._updateScrollIndicator();
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    grip.classList.remove('dragging');
     document.body.style.cursor     = '';
     document.body.style.userSelect = '';
     resizeCanvases();

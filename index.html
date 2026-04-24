@@ -16,7 +16,39 @@
     <div id="subPanel">
       <div id="subPanelTitle">Histogram</div>
       <div id="histContainer">
+        <div id="histToolbar" aria-label="Histogram zoom controls">
+          <button id="histZoomInBtn" class="hist-tool-btn" title="Zoom in" aria-label="Zoom in histogram">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7"></circle>
+              <path d="M16.5 16.5L21 21"></path>
+              <path d="M11 8v6"></path>
+              <path d="M8 11h6"></path>
+            </svg>
+          </button>
+          <button id="histZoomOutBtn" class="hist-tool-btn" title="Zoom out" aria-label="Zoom out histogram">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7"></circle>
+              <path d="M16.5 16.5L21 21"></path>
+              <path d="M8 11h6"></path>
+            </svg>
+          </button>
+          <button id="histZoomResetBtn" class="hist-tool-btn" title="Reset histogram zoom" aria-label="Reset histogram zoom">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7v5h5"></path>
+              <path d="M5.7 16A7 7 0 1 0 6 7.8L4 12"></path>
+            </svg>
+          </button>
+          <button id="histPanBtn" class="hist-tool-btn" title="Pan histogram" aria-label="Pan histogram" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 11V6a2 2 0 0 1 4 0v5"></path>
+              <path d="M12 10V5a2 2 0 0 1 4 0v7"></path>
+              <path d="M16 12V8a2 2 0 0 1 4 0v5"></path>
+              <path d="M8 11a2 2 0 1 0-4 0v3c0 4 3 7 7 7h3c3 0 6-3 6-6v-2"></path>
+            </svg>
+          </button>
+        </div>
         <canvas id="histCanvas"></canvas>
+        <div id="histResizeGrip" title="Resize histogram"></div>
       </div>
 
       <div id="histDivider"></div>
