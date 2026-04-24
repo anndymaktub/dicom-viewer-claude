@@ -9,49 +9,73 @@ A desktop DICOM image viewer built with Electron and Node.js.
 ## Features
 
 ### Image Display
-- **Load DICOM files** via File menu (`Ctrl+O`)
-- **Compressed format support**: JPEG Baseline, JPEG Lossless (Process 14/SV1), JPEG 2000
-- **MONOCHROME1 → MONOCHROME2** auto-inversion with toggle
-- **Zoom & Pan**: `Ctrl + Scroll` to zoom, left-drag to pan, auto-fit on load
+- Load DICOM files via the File menu or `Ctrl+O`.
+- Supports common uncompressed DICOM images and compressed transfer syntaxes including JPEG Baseline, JPEG Lossless, and JPEG 2000.
+- JPEG 2000 decoding runs in a persistent worker so the UI stays responsive while large images load.
+- Supports MONOCHROME1/MONOCHROME2 display handling with auto-inversion and a manual invert toggle.
+- Zoom and pan the image:
+  - `Ctrl + mouse wheel` zooms around the cursor.
+  - Left-drag pans the image.
+  - Images auto-fit to the viewport on load.
+- Optional overlays for patient/study information, window/level, geometry, cursor pixel value, and physical scale ruler.
 
 ### Window / Level
-- Interactive histogram with draggable handles
-  - Drag yellow edges to adjust Window Width
-  - Drag center to adjust Window Center
-- Reset to original DICOM tag values
+- Live histogram visualization for Window Center and Window Width.
+- Drag yellow histogram edges to adjust Window Width.
+- Drag the yellow window region to adjust Window Center.
+- Reset Window Center/Width to the original DICOM tag values.
+
+### Histogram Navigation
+- Histogram panel is resizable:
+  - Drag the vertical divider to resize the image/side-panel split.
+  - Drag the horizontal divider to resize histogram vs. info sections.
+  - Drag the histogram corner grip to resize both width and height.
+- Histogram zoom tools:
+  - Use the magnifier buttons to zoom in/out.
+  - Use the reset button to return to the full histogram range.
+  - Use the mouse wheel over the histogram to zoom around the cursor.
+- Histogram panning:
+  - After zooming in, drag empty histogram space to pan the X-axis range.
+  - Use the hand button to pan the whole histogram even when the window region fills the view.
+- Existing Window Center/Width dragging remains separate from histogram pan/zoom behavior.
+
+### Histogram Range Selection
+- `Shift + drag` on the histogram to brush-select a value range.
+- Matching pixels are highlighted on the main image in magenta.
+- Pixels outside the selected range are dimmed so selected points are easier to see.
+- The dim slider in the histogram toolbar adjusts how strongly non-selected pixels are darkened.
+- The histogram shows the selected range and selected pixel count.
+- The main image overlay shows selected HU range, pixel count, and percentage of the image.
+- Press `Esc` to clear the selection.
 
 ### Display Options
-- Image info overlay (patient, study, W/L, geometry)
-- Smooth interpolation on zoom
-- Manual invert
-- Cursor pixel value display (HU)
-- Physical scale ruler
+- Image information overlay.
+- Smooth interpolation on zoom.
+- Manual invert.
+- Cursor pixel value display in HU/modality values.
+- Physical ruler based on pixel spacing when available.
 
-### Layout
-- **Resizable panels** — three drag handles:
-  - Left/right divider between image and side panel
-  - Top/bottom divider between histogram and info panel
-- All dividers highlight blue on hover/drag
+### Side Panel Sections
 
-### Side Panel — Info Sections
 | Section | Description |
 |---|---|
-| **Histogram** | Live W/C & W/W visualization with draggable handles |
-| **渲染流程 Tags** | Tags used in render pipeline: pixel decode → Modality LUT → VOI LUT → photometric |
-| **DICOM 影像資訊** | Patient, study, series, geometry, acquisition parameters |
-| **所有 DICOM Tags** | Every tag in the file with ID, name, and value |
+| Histogram | Live W/C and W/W visualization with zoom, pan, brushing, and image highlighting |
+| Rendering Pipeline Tags | Tags used for pixel decode, Modality LUT, VOI LUT, and photometric interpretation |
+| DICOM Image Info | Patient, study, series, geometry, and acquisition parameters |
+| All DICOM Tags | Every parsed tag in the file with ID, name, and value |
 
 ### All DICOM Tags Panel
-- **2700+ tag name dictionary** sourced from the DICOM standard
-- Displays tag ID, name, and decoded value (supports US/SS/UL/SL/FL/FD/AT VR types, multi-value)
-- **Live search/filter** by tag ID, name, or value
-- **Right-click context menu**:
-  - Copy all visible tags (tab-separated, paste into Excel)
-  - Copy selected row (ID + name + value)
-  - Copy value only
+- 2700+ tag name dictionary sourced from the DICOM standard.
+- Displays tag ID, name, decoded value, and common numeric VR types.
+- Live search/filter by tag ID, name, or value.
+- Right-click context menu:
+  - Copy all visible tags as tab-separated text for spreadsheet use.
+  - Copy selected row.
+  - Copy selected value only.
 
-### About
-- Version info displayed in title bar, side panel header, and Help → About dialog
+### About / Build Info
+- Version is shown in the window title, side-panel header, and Help/About dialog.
+- Build date is generated before `npm start`, `npm run dist`, and `npm run dist:portable`.
 
 ## Installation
 
@@ -76,30 +100,31 @@ npm run dist
 npm run dist:portable
 ```
 
-### Build outputs
+### Build Outputs
 
 | Command | Output | Description |
 |---|---|---|
-| `npm run dist` | `dist/DICOM Viewer-win32-x64/DICOM Viewer.exe` | Folder-based portable |
+| `npm run dist` | `dist/DICOM Viewer-win32-x64/DICOM Viewer.exe` | Folder-based portable app |
 | `npm run dist:portable` | `dist/DICOM Viewer 1.0.0.exe` | Single-file portable exe |
 
-### Building single-file exe on Windows
+### Building Single-File Exe On Windows
 
 `npm run dist:portable` uses electron-builder with code signing disabled.
 If you get a symlink permission error, use either of these methods:
 
-**Method A — Run PowerShell as Administrator:**
+**Method A - Run PowerShell as Administrator:**
+
 ```powershell
 cd G:\dicom_veiwer_claude
 $env:CSC_IDENTITY_AUTO_DISCOVERY="false"
 npx electron-builder --win portable
 ```
 
-**Method B — Enable Windows Developer Mode (recommended, one-time):**
+**Method B - Enable Windows Developer Mode (recommended, one-time):**
 
-Settings → System → For developers → Developer Mode → On
+Settings > System > For developers > Developer Mode > On
 
-After enabling, `npm run dist:portable` will work in any terminal without admin rights.
+After enabling Developer Mode, `npm run dist:portable` should work in a normal terminal.
 
 ## Tech Stack
 
@@ -110,7 +135,8 @@ After enabling, `npm run dist:portable` will work in any terminal without admin 
 | [jpeg-js](https://github.com/jpeg-js/jpeg-js) | JPEG Baseline decompression |
 | [jpeg-lossless-decoder-js](https://github.com/rii-mango/JPEG-Lossless-Decoder-JS) | JPEG Lossless decompression |
 | [@cornerstonejs/codec-openjpeg](https://github.com/cornerstonejs/codec-openjpeg) | JPEG 2000 decompression (WASM) |
-| [electron-packager](https://github.com/electron/electron-packager) | Portable exe packaging |
+| [electron-packager](https://github.com/electron/electron-packager) | Folder-based portable packaging |
+| [electron-builder](https://www.electron.build/) | Single-file portable packaging |
 
 ## Supported Transfer Syntaxes
 
@@ -123,12 +149,9 @@ After enabling, `npm run dist:portable` will work in any terminal without admin 
 | 1.2.840.10008.1.2.4.51 | JPEG Extended (12-bit) |
 | 1.2.840.10008.1.2.4.57 | JPEG Lossless Process 14 |
 | 1.2.840.10008.1.2.4.70 | JPEG Lossless SV1 |
-| 1.2.840.10008.1.2.4.80 | JPEG-LS Lossless |
-| 1.2.840.10008.1.2.4.81 | JPEG-LS Lossy |
 | 1.2.840.10008.1.2.4.90 | JPEG 2000 Lossless |
 | 1.2.840.10008.1.2.4.91 | JPEG 2000 Lossy |
-| 1.2.840.10008.1.2.5 | RLE Lossless |
 
 ## License
 
-GPL v2 © [Anndy](https://github.com/anndymaktub)
+GPL v2 (c) [Anndy](https://github.com/anndymaktub)
