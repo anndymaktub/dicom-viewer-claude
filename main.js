@@ -1,6 +1,7 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, dialog } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const { version } = require('./package.json');
 let buildDate = '';
@@ -65,6 +66,16 @@ function createWindow() {
       ],
     },
     {
+      label: 'Function',
+      submenu: [
+        {
+          label: 'Export Raw Histogram CSV',
+          accelerator: 'CmdOrCtrl+Shift+H',
+          click: () => mainWindow.webContents.send('export-raw-histogram-csv'),
+        },
+      ],
+    },
+    {
       label: '說明',
       submenu: [
         {
@@ -86,6 +97,21 @@ function createWindow() {
   const menu = Menu.buildFromTemplate(menuTemplate);
   Menu.setApplicationMenu(menu);
 }
+
+ipcMain.handle('save-raw-histogram-csv', async (_event, { csv, defaultPath }) => {
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export Raw Histogram CSV',
+    defaultPath: defaultPath || 'raw_histogram.csv',
+    filters: [
+      { name: 'CSV Files', extensions: ['csv'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+
+  if (canceled || !filePath) return { canceled: true };
+  fs.writeFileSync(filePath, csv, 'utf8');
+  return { canceled: false, filePath };
+});
 
 app.whenReady().then(createWindow);
 

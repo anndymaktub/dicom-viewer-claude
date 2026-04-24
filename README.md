@@ -47,6 +47,7 @@ A desktop DICOM image viewer built with Electron and Node.js.
 - The histogram shows the selected range and selected pixel count.
 - The main image overlay shows selected HU range, pixel count, and percentage of the image.
 - Press `Esc` to clear the selection.
+- Export exact raw histogram value/count data from `Function > Export Raw Histogram CSV`.
 
 ### Display Options
 - Image information overlay.

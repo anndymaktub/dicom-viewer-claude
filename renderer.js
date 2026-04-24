@@ -48,6 +48,7 @@ const state = {
   colorPixels: null,      // Uint8Array RGBRGB... (for color images)
   imageWidth: 0,
   imageHeight: 0,
+  currentFilePath: '',
 
   // Window / Level
   windowCenter: 0,
@@ -342,6 +343,10 @@ ipcRenderer.on('load-dicom-path', async (event, filePath) => {
     console.error(err);
     alert(`DICOM 載入失敗\n\n${msg}`);
   }
+});
+
+ipcRenderer.on('export-raw-histogram-csv', async () => {
+  await exportRawHistogramCsv();
 });
 
 // ==================== DICOM Metadata Helpers ====================
@@ -2912,6 +2917,7 @@ async function loadDicom(nodeBuffer, filePath) {
   state.colorPixels       = colorPixels;
   state.imageWidth        = cols;
   state.imageHeight       = rows;
+  state.currentFilePath   = filePath || '';
   state.windowCenter      = wc;
   state.windowWidth       = ww;
   state.originalWC        = wc;
@@ -3010,6 +3016,73 @@ function calculateRawHistogramStats(values, slope, intercept) {
     valueStep: Math.abs(slope) || 1,
     valueOffset: intercept || 0,
   };
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function getRawHistogramCsvDefaultPath() {
+  const filePath = state.currentFilePath || '';
+  const baseName = filePath ? path.basename(filePath, path.extname(filePath)) : 'dicom';
+  const safeBase = baseName.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_') || 'dicom';
+  return `${safeBase}_raw_histogram.csv`;
+}
+
+function buildRawHistogramCsv() {
+  if (!histogramStats || !histogramStats.sortedValues.length) return null;
+
+  const total = histogramStats.sortedValues.reduce((sum, value) => (
+    sum + (histogramStats.countsByValue.get(value) || 0)
+  ), 0);
+  let cumulative = 0;
+
+  const rows = [
+    ['value', 'count', 'percent', 'cumulative_count', 'cumulative_percent'],
+  ];
+
+  for (const value of histogramStats.sortedValues) {
+    const count = histogramStats.countsByValue.get(value) || 0;
+    cumulative += count;
+    const percent = total > 0 ? count / total * 100 : 0;
+    const cumulativePercent = total > 0 ? cumulative / total * 100 : 0;
+    rows.push([
+      formatHistogramValue(value),
+      count,
+      percent.toFixed(8),
+      cumulative,
+      cumulativePercent.toFixed(8),
+    ]);
+  }
+
+  return '\uFEFF' + rows.map(row => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
+}
+
+async function exportRawHistogramCsv() {
+  const csv = buildRawHistogramCsv();
+  if (!csv) {
+    statusBar.textContent = 'No raw histogram data to export.';
+    alert('No raw histogram data is available. Load a DICOM image first.');
+    return;
+  }
+
+  try {
+    const result = await ipcRenderer.invoke('save-raw-histogram-csv', {
+      csv,
+      defaultPath: getRawHistogramCsvDefaultPath(),
+    });
+    if (!result || result.canceled) {
+      statusBar.textContent = 'Raw histogram CSV export canceled.';
+      return;
+    }
+    statusBar.textContent = `Exported raw histogram CSV: ${result.filePath}`;
+  } catch (err) {
+    const msg = err.message || String(err);
+    statusBar.textContent = `Raw histogram CSV export failed: ${msg}`;
+    console.error(err);
+    alert(`Raw histogram CSV export failed\n\n${msg}`);
+  }
 }
 
 function getRawHistogramPointAtValue(targetValue) {
