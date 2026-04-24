@@ -85,6 +85,12 @@ const state = {
   histDragStartMax: 1,
   histCursorX: null,
   histCursorY: null,
+  histBrushDragging: false,
+  histBrushStartX: 0,
+  histSelectionMin: null,
+  histSelectionMax: null,
+  histSelectionCount: 0,
+  histOutsideDimOpacity: 0.65,
 
   // Photometric interpretation
   photometricInterp: 'MONOCHROME2',
@@ -120,6 +126,7 @@ const histZoomInBtn    = document.getElementById('histZoomInBtn');
 const histZoomOutBtn   = document.getElementById('histZoomOutBtn');
 const histZoomResetBtn = document.getElementById('histZoomResetBtn');
 const histPanBtn       = document.getElementById('histPanBtn');
+const histOutsideDimOpacity = document.getElementById('histOutsideDimOpacity');
 const wcDisplay          = document.getElementById('wcDisplay');
 const wwDisplay          = document.getElementById('wwDisplay');
 const resetBtn           = document.getElementById('resetBtn');
@@ -130,6 +137,10 @@ const dicomInfoGrid      = document.getElementById('dicomInfoGrid');
 
 // Offscreen canvas for window/level rendered pixels
 let offscreenCanvas = null;
+
+// Highlight mask for pixels selected from the histogram brush range.
+let histSelectionCanvas = null;
+let histSelectionDimCanvas = null;
 
 // Histogram display data: fixed-size bins used only for drawing bars.
 let histogramData = null;
@@ -2913,6 +2924,12 @@ async function loadDicom(nodeBuffer, filePath) {
   state.histFullXMax      = histXMax;
   state.histPanMode       = false;
   state.histDragging      = null;
+  state.histBrushDragging = false;
+  state.histSelectionMin  = null;
+  state.histSelectionMax  = null;
+  state.histSelectionCount = 0;
+  histSelectionCanvas     = null;
+  histSelectionDimCanvas  = null;
   const tsUID = getTransferSyntaxUID(dataSet);
   const renderPipeline = {
     // ① 像素解碼
@@ -3084,6 +3101,85 @@ function applyWindowLevelToOffscreen() {
   ctx.putImageData(imgData, 0, 0);
 }
 
+function hasHistogramSelection() {
+  return Number.isFinite(state.histSelectionMin) && Number.isFinite(state.histSelectionMax);
+}
+
+function rebuildHistogramSelectionOverlay() {
+  if (!hasHistogramSelection() || !state.pixelValues || !state.imageWidth || !state.imageHeight) {
+    histSelectionCanvas = null;
+    histSelectionDimCanvas = null;
+    state.histSelectionCount = 0;
+    return;
+  }
+
+  if (!histSelectionCanvas) {
+    histSelectionCanvas = document.createElement('canvas');
+  }
+  if (!histSelectionDimCanvas) {
+    histSelectionDimCanvas = document.createElement('canvas');
+  }
+  histSelectionCanvas.width = state.imageWidth;
+  histSelectionCanvas.height = state.imageHeight;
+  histSelectionDimCanvas.width = state.imageWidth;
+  histSelectionDimCanvas.height = state.imageHeight;
+
+  const ctx = histSelectionCanvas.getContext('2d');
+  const dimCtx = histSelectionDimCanvas.getContext('2d');
+  if (!ctx || !dimCtx) return;
+
+  const imgData = ctx.createImageData(state.imageWidth, state.imageHeight);
+  const data = imgData.data;
+  const dimImgData = dimCtx.createImageData(state.imageWidth, state.imageHeight);
+  const dimData = dimImgData.data;
+  const lo = Math.min(state.histSelectionMin, state.histSelectionMax);
+  const hi = Math.max(state.histSelectionMin, state.histSelectionMax);
+  const dimAlpha = Math.round(clampValue(state.histOutsideDimOpacity, 0.15, 0.9) * 255);
+  let count = 0;
+
+  for (let i = 0; i < state.pixelValues.length; i++) {
+    const v = state.pixelValues[i];
+    const idx = i * 4;
+    if (v < lo || v > hi) {
+      dimData[idx]     = 0;
+      dimData[idx + 1] = 0;
+      dimData[idx + 2] = 0;
+      dimData[idx + 3] = dimAlpha;
+      continue;
+    }
+    data[idx]     = 255;
+    data[idx + 1] = 79;
+    data[idx + 2] = 216;
+    data[idx + 3] = 255;
+    count++;
+  }
+
+  state.histSelectionCount = count;
+  dimCtx.putImageData(dimImgData, 0, 0);
+  ctx.putImageData(imgData, 0, 0);
+}
+
+function setHistogramSelection(min, max) {
+  if (!state.pixelValues) return;
+  state.histSelectionMin = Math.min(min, max);
+  state.histSelectionMax = Math.max(min, max);
+  rebuildHistogramSelectionOverlay();
+  renderMainCanvas();
+  renderHistogram();
+}
+
+function clearHistogramSelection() {
+  if (!hasHistogramSelection() && !state.histBrushDragging) return;
+  state.histBrushDragging = false;
+  state.histSelectionMin = null;
+  state.histSelectionMax = null;
+  state.histSelectionCount = 0;
+  histSelectionCanvas = null;
+  histSelectionDimCanvas = null;
+  renderMainCanvas();
+  renderHistogram();
+}
+
 // ==================== Main Canvas Rendering ====================
 function renderMainCanvas() {
   mainCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
@@ -3108,10 +3204,24 @@ function renderMainCanvas() {
   mainCtx.imageSmoothingEnabled = state.smoothInterp;
   mainCtx.imageSmoothingQuality = 'high';
   mainCtx.drawImage(offscreenCanvas, 0, 0);
+  if (histSelectionDimCanvas) {
+    mainCtx.imageSmoothingEnabled = false;
+    mainCtx.drawImage(histSelectionDimCanvas, 0, 0);
+  }
+  if (histSelectionCanvas) {
+    mainCtx.imageSmoothingEnabled = false;
+    mainCtx.shadowColor = '#ff4fd8';
+    mainCtx.shadowBlur = 8;
+    mainCtx.globalCompositeOperation = 'lighter';
+    mainCtx.drawImage(histSelectionCanvas, 0, 0);
+    mainCtx.globalCompositeOperation = 'source-over';
+    mainCtx.shadowBlur = 0;
+  }
   mainCtx.restore();
 
   if (state.showInfoOverlay && state.imageWidth) drawInfoOverlay();
   if (state.showRuler && state.imageWidth)        drawRuler();
+  if (hasHistogramSelection()) drawHistogramSelectionOverlay();
   if (state.showPixelValue && state.cursorPixelValue !== null) drawPixelValueOverlay();
 }
 
@@ -3192,6 +3302,19 @@ function drawPixelValueOverlay() {
   mainCtx.shadowBlur   = 4;
   mainCtx.fillStyle    = '#ffe066';
   mainCtx.fillText(label, 10, mainCanvas.height - 6);
+  mainCtx.shadowBlur   = 0;
+}
+
+function drawHistogramSelectionOverlay() {
+  const total = Math.max(state.imageWidth * state.imageHeight, 1);
+  const pct = state.histSelectionCount / total * 100;
+  const label = `Selected HU: ${formatHistogramValue(state.histSelectionMin)} to ${formatHistogramValue(state.histSelectionMax)}  |  ${state.histSelectionCount} px (${pct.toFixed(2)}%)`;
+  mainCtx.font         = '12px Consolas, monospace';
+  mainCtx.textAlign    = 'left';
+  mainCtx.shadowColor  = '#000';
+  mainCtx.shadowBlur   = 4;
+  mainCtx.fillStyle    = '#ff4fd8';
+  mainCtx.fillText(label, 10, mainCanvas.height - 22);
   mainCtx.shadowBlur   = 0;
 }
 
@@ -3290,6 +3413,24 @@ function renderHistogram() {
     histCtx.fillRect(x, y, Math.max(1, binPxW - 0.5), barH);
   }
 
+  // --- Histogram brush selection ---
+  if (hasHistogramSelection()) {
+    const sxMin = Math.max(valToX(state.histSelectionMin), M.left);
+    const sxMax = Math.min(valToX(state.histSelectionMax), M.left + drawW);
+    if (sxMax > sxMin) {
+      histCtx.fillStyle = 'rgba(255, 79, 216, 0.22)';
+      histCtx.fillRect(sxMin, M.top, sxMax - sxMin, drawH);
+      histCtx.strokeStyle = '#ff4fd8';
+      histCtx.lineWidth = 2;
+      histCtx.beginPath();
+      histCtx.moveTo(sxMin, M.top);
+      histCtx.lineTo(sxMin, M.top + drawH);
+      histCtx.moveTo(sxMax, M.top);
+      histCtx.lineTo(sxMax, M.top + drawH);
+      histCtx.stroke();
+    }
+  }
+
   // --- Window overlay (yellow tinted region) ---
   const wMin   = state.windowCenter - state.windowWidth / 2;
   const wMax   = state.windowCenter + state.windowWidth / 2;
@@ -3378,6 +3519,12 @@ function renderHistogram() {
   histCtx.textAlign = 'left';
   histCtx.fillText(`WC: ${Math.round(state.windowCenter)}`, M.left + 6, M.top + 13);
   histCtx.fillText(`WW: ${Math.round(state.windowWidth)}`,  M.left + 6, M.top + 26);
+  if (hasHistogramSelection()) {
+    histCtx.fillStyle = '#ff4fd8';
+    histCtx.font      = 'bold 11px Consolas, monospace';
+    histCtx.textAlign = 'right';
+    histCtx.fillText(`SEL: ${state.histSelectionCount}`, M.left + drawW - 6, M.top + 13);
+  }
 
   // --- Mouse crosshair + tooltip ---
   if (state.histCursorX !== null) {
@@ -3557,6 +3704,15 @@ histCanvas.addEventListener('mousedown', (e) => {
   if (e.button !== 0 || !histogramData) return;
 
   const mouseX  = getHistMouseX(e);
+  if (e.shiftKey) {
+    state.histBrushDragging = true;
+    state.histBrushStartX = mouseX;
+    setHistogramSelection(histXToVal(mouseX), histXToVal(mouseX));
+    histCanvas.style.cursor = 'crosshair';
+    e.preventDefault();
+    return;
+  }
+
   const wMin    = state.windowCenter - state.windowWidth / 2;
   const wMax    = state.windowCenter + state.windowWidth / 2;
   const xWMin   = histValToX(wMin);
@@ -3590,6 +3746,12 @@ histCanvas.addEventListener('mousemove', (e) => {
   const mouseY = (e.clientY - rect.top) * scaleY;
   state.histCursorX = mouseX;
   state.histCursorY = mouseY;
+
+  if (state.histBrushDragging) {
+    setHistogramSelection(histXToVal(state.histBrushStartX), histXToVal(mouseX));
+    histCanvas.style.cursor = 'crosshair';
+    return;
+  }
 
   if (!state.histDragging) {
     if (!histogramData) return;
@@ -3671,6 +3833,21 @@ if (histPanBtn) {
     renderHistogram();
   });
 }
+if (histOutsideDimOpacity) {
+  histOutsideDimOpacity.addEventListener('input', (e) => {
+    state.histOutsideDimOpacity = parseFloat(e.target.value) || 0.65;
+    if (hasHistogramSelection()) {
+      rebuildHistogramSelectionOverlay();
+      renderMainCanvas();
+    }
+  });
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    clearHistogramSelection();
+  }
+});
 
 // ==================== Main Canvas Events ====================
 mainCanvas.addEventListener('wheel', (e) => {
@@ -3748,6 +3925,10 @@ histCanvas.addEventListener('mouseleave', () => {
 
 // Global mouseup to end histogram drag even if cursor leaves canvas
 document.addEventListener('mouseup', () => {
+  if (state.histBrushDragging) {
+    state.histBrushDragging = false;
+    histCanvas.style.cursor = 'crosshair';
+  }
   if (state.histDragging) {
     state.histDragging = null;
     histCanvas.style.cursor = state.histPanMode && isHistogramZoomed() ? 'grab' : 'crosshair';

@@ -101,6 +101,7 @@ body {
   top: 8px;
   right: 8px;
   display: flex;
+  align-items: center;
   gap: 4px;
   z-index: 4;
 }
@@ -145,6 +146,13 @@ body {
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.hist-opacity-slider {
+  width: 58px;
+  height: 26px;
+  accent-color: #ff4fd8;
+  cursor: pointer;
 }
 
 #histResizeGrip {
