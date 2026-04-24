@@ -122,8 +122,11 @@ const dicomInfoGrid      = document.getElementById('dicomInfoGrid');
 // Offscreen canvas for window/level rendered pixels
 let offscreenCanvas = null;
 
-// Histogram data: Array of { value, count }
+// Histogram display data: fixed-size bins used only for drawing bars.
 let histogramData = null;
+
+// Raw DICOM histogram stats: exact counts by modality value, used for hover readout.
+let histogramStats = null;
 
 // Histogram drawing margins (in canvas pixels)
 const M = { left: 58, right: 14, top: 18, bottom: 46 };
@@ -2680,6 +2683,8 @@ async function loadDicom(nodeBuffer, filePath) {
   // Release previous resources
   _allTagsDataSet = null;
   _allTagsRows    = [];
+  histogramData    = null;
+  histogramStats   = null;
 
   statusBar.textContent = '解析 DICOM 格式...';
   await yieldToUI();
@@ -2932,7 +2937,8 @@ async function loadDicom(nodeBuffer, filePath) {
   document.getElementById('monoRow').style.display =
     photoInterp === 'MONOCHROME1' ? 'flex' : 'none';
 
-  histogramData = calculateHistogram(modalityValues, histXMin, histXMax, 256);
+  histogramStats = calculateRawHistogramStats(modalityValues, slope, intercept);
+  histogramData  = calculateHistogram(modalityValues, histXMin, histXMax, 256);
 
   if (offscreenCanvas) {
     offscreenCanvas.width = 0;
@@ -2958,6 +2964,47 @@ async function loadDicom(nodeBuffer, filePath) {
 }
 
 // ==================== Histogram Calculation ====================
+function calculateRawHistogramStats(values, slope, intercept) {
+  const countsByValue = new Map();
+
+  for (let i = 0; i < values.length; i++) {
+    const value = values[i];
+    if (!Number.isFinite(value)) continue;
+    countsByValue.set(value, (countsByValue.get(value) || 0) + 1);
+  }
+
+  const sortedValues = Array.from(countsByValue.keys()).sort((a, b) => a - b);
+  return {
+    countsByValue,
+    sortedValues,
+    valueStep: Math.abs(slope) || 1,
+    valueOffset: intercept || 0,
+  };
+}
+
+function getRawHistogramPointAtValue(targetValue) {
+  if (!histogramStats || !histogramStats.sortedValues.length) return null;
+
+  const step = histogramStats.valueStep || 1;
+  const offset = histogramStats.valueOffset || 0;
+  let value = offset + Math.round((targetValue - offset) / step) * step;
+  value = Math.fround(value);
+
+  if (Math.abs(value - Math.round(value)) < 1e-6) {
+    value = Math.round(value);
+  }
+
+  return { value, count: histogramStats.countsByValue.get(value) || 0 };
+}
+
+function formatHistogramValue(value) {
+  if (!Number.isFinite(value)) return '?';
+  if (Math.abs(value - Math.round(value)) < 1e-6) return Math.round(value).toString();
+  const abs = Math.abs(value);
+  const digits = abs >= 1000 ? 1 : abs >= 10 ? 2 : 3;
+  return value.toFixed(digits).replace(/\.?0+$/, '');
+}
+
 function calculateHistogram(values, xMin, xMax, bins) {
   const counts = new Array(bins).fill(0);
   const range  = xMax - xMin;
@@ -3221,8 +3268,9 @@ function renderHistogram() {
   // --- Histogram bars ---
   histCtx.fillStyle = '#1a5276';
   for (let i = 0; i < numBins; i++) {
-    const barH = (histogramData[i].count / maxCount) * drawH;
-    if (barH < 0.5) continue;
+    const count = histogramData[i].count;
+    if (count <= 0) continue;
+    const barH = Math.max(1, Math.sqrt(count / maxCount) * drawH);
     const x = M.left + (i / numBins) * drawW;
     const y = M.top + drawH - barH;
     histCtx.fillRect(x, y, Math.max(1, binPxW - 0.5), barH);
@@ -3322,12 +3370,10 @@ function renderHistogram() {
     const cx = state.histCursorX;
     const cy = state.histCursorY;
     if (cx >= M.left && cx <= M.left + drawW && cy >= M.top && cy <= M.top + drawH) {
-      // X value (pixel intensity)
-      const xVal = state.histXMin + (cx - M.left) / drawW * (state.histXMax - state.histXMin);
-      // Find bin at cursor
-      const binIdx = Math.floor((cx - M.left) / drawW * numBins);
-      const clampedBin = Math.max(0, Math.min(numBins - 1, binIdx));
-      const yCount = histogramData[clampedBin] ? histogramData[clampedBin].count : 0;
+      const cursorValue = state.histXMin + (cx - M.left) / drawW * (state.histXMax - state.histXMin);
+      const rawPoint = getRawHistogramPointAtValue(cursorValue);
+      const xVal = rawPoint ? rawPoint.value : cursorValue;
+      const yCount = rawPoint ? rawPoint.count : 0;
 
       // Crosshair lines
       histCtx.save();
@@ -3345,7 +3391,7 @@ function renderHistogram() {
       histCtx.setLineDash([]);
 
       // Tooltip box
-      const label1 = `X: ${Math.round(xVal)}`;
+      const label1 = `X: ${formatHistogramValue(xVal)}`;
       const label2 = `Y: ${yCount}`;
       histCtx.font = '11px Consolas, monospace';
       const tw = Math.max(histCtx.measureText(label1).width, histCtx.measureText(label2).width);
