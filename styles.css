@@ -101,8 +101,11 @@ body {
   top: 8px;
   right: 8px;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 4px;
+  max-width: calc(100% - 16px);
   z-index: 4;
 }
 
@@ -149,7 +152,7 @@ body {
 }
 
 .hist-opacity-slider {
-  width: 58px;
+  width: 52px;
   height: 26px;
   accent-color: #ff4fd8;
   cursor: pointer;
@@ -310,6 +313,7 @@ body {
 }
 
 /* ---- Buttons ---- */
+#fullWindowBtn,
 #resetBtn {
   width: 100%;
   margin-top: 8px;
@@ -323,12 +327,14 @@ body {
   transition: background 0.15s, border-color 0.15s;
 }
 
+#fullWindowBtn:hover,
 #resetBtn:hover {
   background: #2a6ea6;
   border-color: #58a6ff;
   color: #fff;
 }
 
+#fullWindowBtn:active,
 #resetBtn:active { background: #1a4f8a; }
 
 .help-hint {

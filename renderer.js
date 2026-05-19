@@ -130,11 +130,76 @@ const histPanBtn       = document.getElementById('histPanBtn');
 const histOutsideDimOpacity = document.getElementById('histOutsideDimOpacity');
 const wcDisplay          = document.getElementById('wcDisplay');
 const wwDisplay          = document.getElementById('wwDisplay');
+const fullWindowBtn      = document.getElementById('fullWindowBtn');
 const resetBtn           = document.getElementById('resetBtn');
 const statusBar          = document.getElementById('statusBar');
 document.getElementById('subPanelTitle').textContent = `DICOM Viewer v${version}`;
 const dicomInfoSection   = document.getElementById('dicomInfoSection');
 const dicomInfoGrid      = document.getElementById('dicomInfoGrid');
+
+// Optional local extensions are intentionally absent from the public build.
+const localExtensions = [];
+
+function getLocalExtensionContext() {
+  return {
+    state,
+    document,
+    elements: {
+      controlsArea: document.getElementById('controlsArea'),
+      histToolbar: document.getElementById('histToolbar'),
+      histCanvas,
+      statusBar,
+    },
+    getHistogramStats: () => histogramStats,
+    getHistogramData: () => histogramData,
+    setWindowLevel: (windowCenter, windowWidth) => {
+      if (!Number.isFinite(windowCenter) || !Number.isFinite(windowWidth) || windowWidth <= 0) return false;
+      state.windowCenter = windowCenter;
+      state.windowWidth = windowWidth;
+      renderAll();
+      return true;
+    },
+    renderAll,
+    renderHistogram,
+    formatHistogramValue,
+    clampValue,
+    calculateHistogram,
+  };
+}
+
+function loadLocalExtensions() {
+  const entries = [
+    path.join(__dirname, 'local_extensions', 'index.js'),
+    process.resourcesPath ? path.join(process.resourcesPath, 'local_extensions', 'index.js') : '',
+  ];
+  const entry = entries.find(candidate => candidate && fs.existsSync(candidate));
+  if (!entry) return;
+  try {
+    const loaded = require(entry);
+    const modules = typeof loaded === 'function'
+      ? loaded(getLocalExtensionContext())
+      : (loaded.modules || loaded.default || []);
+    for (const moduleDef of Array.isArray(modules) ? modules : [modules]) {
+      if (!moduleDef) continue;
+      if (typeof moduleDef.register === 'function') moduleDef.register(getLocalExtensionContext());
+      localExtensions.push(moduleDef);
+    }
+  } catch (err) {
+    console.warn('Optional extension load failed:', err);
+  }
+}
+
+function notifyLocalExtensions(eventName, payload) {
+  for (const moduleDef of localExtensions) {
+    const handler = moduleDef && moduleDef[eventName];
+    if (typeof handler !== 'function') continue;
+    try {
+      handler(payload, getLocalExtensionContext());
+    } catch (err) {
+      console.warn(`Optional extension ${eventName} failed:`, err);
+    }
+  }
+}
 
 // Offscreen canvas for window/level rendered pixels
 let offscreenCanvas = null;
@@ -148,6 +213,11 @@ let histogramData = null;
 
 // Raw DICOM histogram stats: exact counts by modality value, used for hover readout.
 let histogramStats = null;
+
+loadLocalExtensions();
+document.addEventListener('DOMContentLoaded', () => {
+  notifyLocalExtensions('onAppReady', null);
+});
 
 // Histogram drawing margins (in canvas pixels)
 const M = { left: 58, right: 14, top: 18, bottom: 46 };
@@ -2975,6 +3045,18 @@ async function loadDicom(nodeBuffer, filePath) {
 
   histogramStats = calculateRawHistogramStats(modalityValues, slope, intercept);
   histogramData  = calculateHistogram(modalityValues, histXMin, histXMax, 256);
+  notifyLocalExtensions('onImageLoaded', {
+    filePath,
+    dataSet,
+    modalityValues,
+    histogramStats,
+    histogramData,
+    theoreticalMin,
+    theoreticalMax,
+    pixelMin: pixMin,
+    pixelMax: pixMax,
+    colorPixels,
+  });
 
   if (offscreenCanvas) {
     offscreenCanvas.width = 0;
@@ -4055,6 +4137,38 @@ document.querySelectorAll('.section-header[data-target]').forEach(header => {
 });
 
 // ==================== Reset Button ====================
+function getFullWindowRange() {
+  const p = state.renderPipeline;
+  if (!p || !Number.isFinite(p.bitsStored) || p.bitsStored <= 0) return null;
+
+  let storedMin;
+  let storedMax;
+  if (p.pixelRepresentation === 1) {
+    storedMin = -Math.pow(2, p.bitsStored - 1);
+    storedMax = Math.pow(2, p.bitsStored - 1) - 1;
+  } else {
+    storedMin = 0;
+    storedMax = Math.pow(2, p.bitsStored) - 1;
+  }
+
+  const slope = Number.isFinite(p.rescaleSlope) ? p.rescaleSlope : 1;
+  const intercept = Number.isFinite(p.rescaleIntercept) ? p.rescaleIntercept : 0;
+  let min = storedMin * slope + intercept;
+  let max = storedMax * slope + intercept;
+  if (max < min) [min, max] = [max, min];
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return null;
+  return { min, max };
+}
+
+fullWindowBtn.addEventListener('click', () => {
+  if (!state.pixelValues || state.colorPixels) return;
+  const range = getFullWindowRange();
+  if (!range) return;
+  state.windowCenter = (range.min + range.max) / 2;
+  state.windowWidth = range.max - range.min;
+  renderAll();
+});
+
 resetBtn.addEventListener('click', () => {
   if (!state.pixelValues) return;
   state.windowCenter = state.originalWC;

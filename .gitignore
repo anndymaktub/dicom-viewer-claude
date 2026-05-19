@@ -3,3 +3,6 @@ dist/
 dcms/
 tags_*.txt
 build-info.json
+local_extensions/
+private_extensions/
+*_handoff.md
