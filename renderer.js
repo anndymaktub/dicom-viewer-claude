@@ -2733,6 +2733,19 @@ function applyRescale(rawPixels, slope, intercept) {
   return { modalityValues, pixMin, pixMax };
 }
 
+const COLOR_PHOTOMETRIC_INTERPRETATIONS = new Set([
+  'RGB',
+  'YBR_FULL',
+  'YBR_RCT',
+  'YBR_ICT',
+]);
+
+function isColorPhotometric(photoInterp, samplesPerPixel, bitsAllocated) {
+  return samplesPerPixel >= 3 &&
+         bitsAllocated <= 8 &&
+         COLOR_PHOTOMETRIC_INTERPRETATIONS.has(photoInterp);
+}
+
 function extractRgbPixels(rawPixels, pixelCount, samplesPerPixel, planarConfig) {
   if (!rawPixels || samplesPerPixel < 3) return null;
 
@@ -2757,6 +2770,45 @@ function extractRgbPixels(rawPixels, pixelCount, samplesPerPixel, planarConfig) 
     }
   }
   return rgb;
+}
+
+function clampByte(value) {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function ybrFullToRgb(ybrPixels) {
+  const rgb = new Uint8Array(ybrPixels.length);
+  for (let i = 0; i < ybrPixels.length; i += 3) {
+    const y  = ybrPixels[i];
+    const cb = ybrPixels[i + 1] - 128;
+    const cr = ybrPixels[i + 2] - 128;
+    rgb[i]     = clampByte(y + 1.402 * cr);
+    rgb[i + 1] = clampByte(y - 0.344136 * cb - 0.714136 * cr);
+    rgb[i + 2] = clampByte(y + 1.772 * cb);
+  }
+  return rgb;
+}
+
+function extractColorPixels(rawPixels, pixelCount, samplesPerPixel, planarConfig, photoInterp) {
+  const rgb = extractRgbPixels(rawPixels, pixelCount, samplesPerPixel, planarConfig);
+  if (!rgb) return null;
+
+  if (photoInterp === 'YBR_FULL') {
+    return ybrFullToRgb(rgb);
+  }
+
+  // OpenJPEG applies JPEG 2000 RCT/ICT in normal decode output, so these arrive as RGB.
+  return rgb;
+}
+
+function assertDecodedPixelLengths({ modalityValues, colorPixels, pixelCount }) {
+  if (!modalityValues || modalityValues.length !== pixelCount) {
+    const actual = modalityValues ? modalityValues.length : 0;
+    throw new Error(`Decoded grayscale pixel length mismatch: expected ${pixelCount}, got ${actual}`);
+  }
+  if (colorPixels && colorPixels.length !== pixelCount * 3) {
+    throw new Error(`Decoded color pixel length mismatch: expected ${pixelCount * 3}, got ${colorPixels.length}`);
+  }
 }
 
 function rgbToLuma(rgbPixels) {
@@ -2831,7 +2883,7 @@ async function loadDicom(nodeBuffer, filePath) {
   // --- Photometric Interpretation (0028,0004) ---
   const photoInterp = (dataSet.string('x00280004') || 'MONOCHROME2')
     .trim().toUpperCase().replace(/\0/g, '');
-  const isRgbImage = photoInterp === 'RGB' && samplesPerPixel >= 3 && bitsAllocated <= 8;
+  const isColorImage = isColorPhotometric(photoInterp, samplesPerPixel, bitsAllocated);
 
   // --- Extended metadata ---
   const str = (tag) => readDicomString(dataSet, tag);
@@ -2890,7 +2942,7 @@ async function loadDicom(nodeBuffer, filePath) {
     await yieldToUI();
 
     const isJ2K = tsUID === '1.2.840.10008.1.2.4.90' || tsUID === '1.2.840.10008.1.2.4.91';
-    if (isJ2K && !isRgbImage) {
+    if (isJ2K && !isColorImage) {
       // Offload WASM decode + rescale to background worker so UI stays responsive
       const result = await decodeInWorker(frameData, bitsAllocated, pixelRepresentation, slope, intercept);
       modalityValues = new Float32Array(result.modalityBuf);
@@ -2898,8 +2950,8 @@ async function loadDicom(nodeBuffer, filePath) {
       pixMax         = result.pixMax;
     } else {
       const decoded = await decodeCompressedFrame(frameData, tsUID, bitsAllocated, pixelRepresentation, samplesPerPixel);
-      if (isRgbImage) {
-        const rgb = extractRgbPixels(decoded.pixels, pixelCount, samplesPerPixel, planarConfig);
+      if (isColorImage) {
+        const rgb = extractColorPixels(decoded.pixels, pixelCount, samplesPerPixel, planarConfig, photoInterp);
         if (rgb && rgb.length === pixelCount * 3) {
           colorPixels = rgb;
           ({ modalityValues, pixMin, pixMax } = applyRescale(rgbToLuma(rgb), slope, intercept));
@@ -2940,8 +2992,8 @@ async function loadDicom(nodeBuffer, filePath) {
     }
     statusBar.textContent = '處理像素資料...';
     await yieldToUI();
-    if (isRgbImage) {
-      const rgb = extractRgbPixels(rawPixels, pixelCount, samplesPerPixel, planarConfig);
+    if (isColorImage) {
+      const rgb = extractColorPixels(rawPixels, pixelCount, samplesPerPixel, planarConfig, photoInterp);
       if (rgb && rgb.length === pixelCount * 3) {
         colorPixels = rgb;
         ({ modalityValues, pixMin, pixMax } = applyRescale(rgbToLuma(rgb), slope, intercept));
@@ -2952,6 +3004,8 @@ async function loadDicom(nodeBuffer, filePath) {
       ({ modalityValues, pixMin, pixMax } = applyRescale(rawPixels, slope, intercept));
     }
   }
+
+  assertDecodedPixelLengths({ modalityValues, colorPixels, pixelCount });
 
   // Theoretical range based on High Bit and pixel representation
   let storedMin, storedMax;
